@@ -752,7 +752,7 @@ pm AS (
 dims AS (
   SELECT LOWER(TRIM(Team_ID)) AS team_id,
          ANY_VALUE(Region) AS region,
-         ANY_VALUE(Enterprise_Details__Enterprise__Customer_Segment) AS segment
+         ANY_VALUE(Enterprise_Details___Enterprise___Customer_Segment) AS segment
   FROM \`${P}.${D}.arr\`
   WHERE Team_ID IS NOT NULL AND TRIM(Team_ID) != ''
   GROUP BY team_id
@@ -817,6 +817,7 @@ async function loadCost(){
       try{ BQ.token=await bqToken(false); return await bq(costSql()); }catch(e2){ return null; }
     }
     state.costError=e.message||String(e);
+    try{ console.error("cost query failed:", state.costError); }catch(_){}
     return null;
   }
 }
@@ -1194,8 +1195,11 @@ function controlsHTML(){
     '<div class="ctl"><span>Segment</span><div class="chips">'+
       SEGMENTS.map(s=>'<button class="chip" data-seg="'+s.id+'" aria-pressed="'+(s.id===state.segment)+'">'+esc(s.label)+'</button>').join("")+
     '</div></div>'+
-    (COST && !state.cost ? '<div class="ctl"><button class="chip" id="bqBtn">'+
-       (state.costError ? "Cost unavailable \u2014 retry" : "Connect BigQuery for cost")+'</button></div>' : '')+
+    (COST && !state.cost ? '<div class="ctl"><button class="chip" id="bqBtn"'+
+       (state.costError ? ' title="'+esc(state.costError)+'"' : '')+'>'+
+       (state.costError ? "Cost unavailable \u2014 retry" : "Connect BigQuery for cost")+'</button>'+
+       (state.costError ? '<span class="note" style="max-width:46ch;color:var(--down)">'+
+          esc(state.costError.slice(0,160))+'</span>' : '')+'</div>' : '')+
     (regs.length?'<div class="ctl"><span>Regions</span><div class="chips">'+
       regs.map(r=>'<button class="chip" data-region="'+esc(r)+'" aria-pressed="'+regSet().has(r)+'">'+esc(r)+'</button>').join("")+
       '</div><button class="linky" id="regAll">'+(regSet().size===regs.length?"Clear all":"Select all")+'</button></div>':'')+
