@@ -247,12 +247,9 @@ function mkMetrics(lastId,lastLabel){
     { id:"p99_tat_hrs", label:"TAT (P99)", kind:"hrs", better:"low"  },
     { id:"p95_tat_hrs", label:"TAT (P95)", kind:"hrs", better:"low"  },
     { id:lastId,        label:lastLabel,   kind:"pct", better:"high" },
-    { id:"cost",        label:"QC cost",   kind:"inr", better:"low",  agg:"sum",
-      needs:["cost"] },
-    { id:"cost_per_image", label:"Cost / image", kind:"inr2", better:"low", agg:"ratio",
-      num:"cost", den:"images", needs:["cost","images"] },
-    { id:"images",      label:"Volume",    kind:"int", better:"high", agg:"sum",
-      needs:["images"] }
+    { id:"cost",           label:"QC cost",      kind:"inr",  better:"low",  agg:"sum",   src:"bq" },
+    { id:"cost_per_image", label:"Cost / image", kind:"inr2", better:"low",  agg:"ratio", src:"bq" },
+    { id:"images",         label:"Volume",       kind:"int",  better:"high", agg:"sum",   src:"bq" }
   ];
 }
 
@@ -297,7 +294,7 @@ function hasCol(name){
 }
 function metricsOf(){
   const base=(PRODUCTS.find(p=>p.id===state.product)||{}).metrics || METRICS;
-  return base.filter(m=>!m.needs || m.needs.every(hasCol));
+  return base.filter(m=> m.src==="bq" ? !!state.cost : (!m.needs || m.needs.every(hasCol)) );
 }
 function metricById(id){ const l=metricsOf(); return l.find(m=>m.id===id) || l[0]; }
 /* The same measure has a different column name per product (fulfillment_pct vs
@@ -329,7 +326,8 @@ const state = {
   matrixMetric:"sla_pct", matrixLane:"vin",
   drillRegion:null, recordsLane:"vin", recordsQuery:"", hidden:new Set(),
   sortCol:null, sortDir:-1,
-  data:{}, loading:false, error:null, synced:null, user:null, access:null, denied:false, loginLog:null
+  data:{}, loading:false, error:null, synced:null, user:null, access:null, denied:false, loginLog:null,
+  cost:null, costError:null
 };
 function isAdmin(){ return !!(state.user && state.user.admin); }
 /* Sheets are cached per product, so 360's rooftop rows never overwrite images'. */
@@ -370,6 +368,7 @@ async function loadConfig(){
       ADMINS=c.admins.map(e=>String(e).trim().toLowerCase()).filter(Boolean);
     if(c && typeof c.contact==="string" && c.contact.trim()) ACCESS_CONTACT=c.contact.trim();
     if(c && c.loginLog && c.loginLog.formUrl && c.loginLog.fields) LOGIN_LOG=c.loginLog;
+    if(c && c.cost && c.cost.project && c.cost.dataset) COST=c.cost;
   }catch(e){ /* keep defaults */ }
 }
 function decodeJwt(tok){
@@ -590,6 +589,8 @@ async function loadAll(){
       allRegions().forEach(r=>regSet().add(r));
       state.regionsInit[state.product]=true;
     }
+    state.costError=null;
+    state.cost=await loadCost();
     state.synced=new Date();
     if(isAdmin() && LOGIN_LOG && LOGIN_LOG.sheetName){
       try{ state.loginLog=await loadLoginLog(); }catch(e){ state.loginLog=null; }
@@ -615,6 +616,235 @@ async function loadLoginLog(){
   });
   out.sort((a,b)=> (a.at&&b.at) ? b.at-a.at : 0);
   return out;
+}
+
+/* ---------- cost, straight from BigQuery ----------
+   Same cost model as the QC Cost dashboard: a person's monthly salary (prorated
+   for a partial month, carried forward when payroll is late) spread over that
+   month's Sum_Target, giving a rate per unit of target. Work rows are priced at
+   that rate, so a 360 spin costs more than a still. Region and segment come
+   from arr, joined on Team_ID.
+   Queries run as the signed-in user, so this needs BigQuery access on the
+   project. Without it, cost simply doesn't appear rather than erroring.        */
+let COST = null;               // config.json -> "cost": {...}
+const BQ = { token:null, client:null, pending:null, tried:false };
+
+function bqReady(){
+  return new Promise(function(resolve,reject){
+    const t0=Date.now();
+    (function poll(){
+      if(window.google && google.accounts && google.accounts.oauth2) return resolve();
+      if(Date.now()-t0>12000) return reject(new Error("Google sign-in didn't load."));
+      setTimeout(poll,120);
+    })();
+  });
+}
+function bqInitClient(){
+  if(BQ.client) return;
+  BQ.client=google.accounts.oauth2.initTokenClient({
+    client_id:GOOGLE_CLIENT_ID,
+    scope:"https://www.googleapis.com/auth/bigquery.readonly",
+    callback:function(r){
+      const p=BQ.pending; BQ.pending=null;
+      if(!p) return;
+      r && r.access_token ? p.resolve(r.access_token) : p.reject(new Error("No token"));
+    },
+    error_callback:function(){ const p=BQ.pending; BQ.pending=null; if(p) p.reject(new Error("cancelled")); }
+  });
+}
+/* prompt:"" asks for a token without showing anything. It works when the person
+   has already consented; the first time round it needs the visible prompt. */
+function bqToken(interactive){
+  return bqReady().then(function(){
+    bqInitClient();
+    return new Promise(function(resolve,reject){
+      BQ.pending={resolve:resolve,reject:reject};
+      try{ BQ.client.requestAccessToken({prompt:interactive?"consent":"", hint:state.user?state.user.email:undefined}); }
+      catch(e){ BQ.pending=null; reject(e); }
+    });
+  });
+}
+async function bq(sql){
+  const base="https://bigquery.googleapis.com/bigquery/v2/projects/"+COST.project;
+  const auth={ Authorization:"Bearer "+BQ.token, "Content-Type":"application/json" };
+  const res=await fetch(base+"/queries",{method:"POST",headers:auth,
+    body:JSON.stringify({query:sql,useLegacySql:false,timeoutMs:180000,maxResults:20000})});
+  const data=await res.json();
+  if(res.status===401){ const e=new Error("expired"); e.expired=true; throw e; }
+  if(!res.ok) throw new Error((data.error&&data.error.message)||("BigQuery returned "+res.status));
+  if(!data.jobComplete) throw new Error("Query still running \u2014 press Refresh in a moment.");
+  const cols=((data.schema&&data.schema.fields)||[]).map(f=>f.name);
+  const shape=page=>((page.rows)||[]).map(r=>{ const o={}; cols.forEach((c,i)=>o[c]=r.f[i].v); return o; });
+  let rows=shape(data), token=data.pageToken;
+  const job=data.jobReference||{};
+  while(token && rows.length<500000){
+    const qs=new URLSearchParams({pageToken:token,maxResults:"20000"});
+    if(job.location) qs.set("location",job.location);
+    const r2=await fetch(base+"/queries/"+job.jobId+"?"+qs,{headers:auth});
+    const d2=await r2.json();
+    if(!r2.ok) throw new Error((d2.error&&d2.error.message)||"Couldn't page the results.");
+    rows=rows.concat(shape(d2)); token=d2.pageToken;
+  }
+  return rows;
+}
+
+function costSql(){
+  const P=COST.project, D=COST.dataset;
+  const domains=(COST.deliveryDomains||["spyne.co.in"])
+    .map(d=>"LOWER(TRIM(QC)) LIKE '%@"+d+"'").join(" OR ");
+  const assumed=COST.assumedMonthlySalary==null?25000:COST.assumedMonthlySalary;
+  const months=COST.months||8;
+  return `
+WITH work AS (
+  SELECT LOWER(TRIM(QC)) AS qc_email,
+         DATE(Hourly_Date) AS work_date,
+         FORMAT_DATE('%Y-%m', DATE(Hourly_Date)) AS month_key,
+         LOWER(TRIM(Team_id)) AS team_id,
+         TRIM(Product) AS product,
+         IFNULL(Images,0) AS images,
+         IFNULL(Sum_Target,0) AS sum_target
+  FROM \`${P}.${D}.delivery_working_data\`
+  WHERE QC IS NOT NULL AND TRIM(QC) != ''
+    AND DATE(Hourly_Date) >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL ${months} MONTH), MONTH)
+    AND (${domains})
+),
+salary_raw AS (
+  SELECT FORMAT_DATE('%Y-%m', SAFE.PARSE_DATE("%b'%y", Month)) AS month_key,
+         LOWER(TRIM(\`Work Email\`)) AS email, Salary AS salary
+  FROM \`${P}.${D}.salary_sheet\`
+  WHERE \`Work Email\` IS NOT NULL AND Salary IS NOT NULL
+    AND SAFE.PARSE_DATE("%b'%y", Month) IS NOT NULL
+),
+sal_email AS (
+  SELECT month_key, email, SUM(salary) AS salary FROM salary_raw GROUP BY month_key, email
+),
+month_has_salary AS ( SELECT DISTINCT month_key FROM sal_email ),
+pm_volume AS (
+  SELECT qc_email, month_key, SUM(images) AS month_images, SUM(sum_target) AS month_target
+  FROM work GROUP BY qc_email, month_key
+),
+month_span AS (
+  SELECT month_key,
+         DATE_DIFF(MAX(work_date), DATE_TRUNC(MAX(work_date), MONTH), DAY) + 1 AS days_covered,
+         EXTRACT(DAY FROM LAST_DAY(MAX(work_date))) AS days_in_month
+  FROM work GROUP BY month_key
+),
+pm_joined AS (
+  SELECT v.qc_email, v.month_key, v.month_images, v.month_target, s.salary AS actual_salary
+  FROM pm_volume v LEFT JOIN sal_email s
+    ON s.month_key = v.month_key AND s.email = v.qc_email
+),
+pm_filled AS (
+  SELECT *, LAST_VALUE(actual_salary IGNORE NULLS) OVER w AS carried_salary
+  FROM pm_joined
+  WINDOW w AS (PARTITION BY qc_email ORDER BY month_key ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+),
+pm AS (
+  SELECT f.qc_email, f.month_key,
+    SAFE_DIVIDE(
+      COALESCE(f.actual_salary, IF(mh.month_key IS NULL, COALESCE(f.carried_salary, ${assumed}), NULL))
+        * LEAST(1.0, SAFE_DIVIDE(ms.days_covered, ms.days_in_month)),
+      NULLIF(f.month_target, 0)) AS rate
+  FROM pm_filled f
+  JOIN month_span ms USING (month_key)
+  LEFT JOIN month_has_salary mh USING (month_key)
+),
+dims AS (
+  SELECT LOWER(TRIM(Team_ID)) AS team_id,
+         ANY_VALUE(Region) AS region,
+         ANY_VALUE(Enterprise_Details__Enterprise__Customer_Segment) AS segment
+  FROM \`${P}.${D}.arr\`
+  WHERE Team_ID IS NOT NULL AND TRIM(Team_ID) != ''
+  GROUP BY team_id
+),
+priced AS (
+  SELECT w.work_date, w.product, w.images,
+         w.sum_target * IFNULL(pm.rate, 0) AS cost,
+         IF(pm.rate IS NULL, w.images, 0)  AS unpriced_images,
+         IFNULL(d.region,  'Unknown') AS region,
+         IFNULL(d.segment, 'Unknown') AS segment
+  FROM work w
+  JOIN pm ON pm.qc_email = w.qc_email AND pm.month_key = w.month_key
+  LEFT JOIN dims d ON d.team_id = w.team_id
+),
+bucketed AS (
+  SELECT 'month' AS period_type,
+         DATE_DIFF(DATE_TRUNC(CURRENT_DATE(),MONTH), DATE_TRUNC(work_date,MONTH), MONTH) AS idx,
+         product, region, segment, images, cost, unpriced_images
+  FROM priced
+  UNION ALL
+  SELECT 'week',
+         DATE_DIFF(DATE_TRUNC(CURRENT_DATE(),WEEK(MONDAY)), DATE_TRUNC(work_date,WEEK(MONDAY)), WEEK),
+         product, region, segment, images, cost, unpriced_images
+  FROM priced
+)
+SELECT period_type,
+       CASE WHEN period_type='month' AND idx=0 THEN 'MTD'
+            WHEN period_type='month' THEN FORMAT('M-%d', idx)
+            ELSE FORMAT('W-%d', idx) END AS period,
+       product, region, segment,
+       ROUND(SUM(cost),2) AS cost,
+       SUM(images) AS images,
+       SUM(unpriced_images) AS unpriced_images
+FROM bucketed
+WHERE (period_type='month' AND idx <= 5) OR (period_type='week' AND idx <= 5)
+GROUP BY period_type, period, product, region, segment`;
+}
+
+/* map sheet-side names onto what BigQuery returns */
+function costProductMatch(product){
+  const map=(COST&&COST.productMap)||{ images:["images","image"], spin:["360","spin","360 spin"], video:["video"] };
+  const want=map[state.product]||[];
+  const p=String(product||"").trim().toLowerCase();
+  return want.some(w=>p===String(w).toLowerCase());
+}
+function costSegmentOf(segment){
+  const map=(COST&&COST.segmentMap)||{ ent:["enterprise"], mid:["mid-market","mid market","midmarket","mid"],
+                                       resellers:["reseller","resellers"], smb:["smb"] };
+  const s=String(segment||"").trim().toLowerCase();
+  for(const k in map) if(map[k].some(v=>s===String(v).toLowerCase())) return k;
+  return null;
+}
+async function loadCost(){
+  if(!COST || COST.enabled===false || !GOOGLE_CLIENT_ID) return null;
+  if(!BQ.token){
+    try{ BQ.token=await bqToken(false); }
+    catch(e){ return null; }          // no consent yet - offer the button instead
+  }
+  try{ return await bq(costSql()); }
+  catch(e){
+    if(e.expired){
+      try{ BQ.token=await bqToken(false); return await bq(costSql()); }catch(e2){ return null; }
+    }
+    state.costError=e.message||String(e);
+    return null;
+  }
+}
+
+/* aggregate the BQ rows down to the periods on screen */
+function costSeries(laneId, metric, prefix, regionsOverride){
+  const rows=state.cost;
+  if(!rows) return periodsOf().map(()=>null);
+  const px = prefix!=null ? prefix : segPrefix();
+  const segWanted = px==="" ? null : px.replace(/_$/,"");
+  const keep = laneId==="region" ? (regionsOverride||activeRegions()) : null;
+  const acc={};
+  rows.forEach(r=>{
+    if(r.period_type!==state.granularity) return;
+    if(!costProductMatch(r.product)) return;
+    if(segWanted && costSegmentOf(r.segment)!==segWanted) return;
+    if(keep && keep.indexOf(r.region)<0) return;
+    const a=acc[r.period]||(acc[r.period]={cost:0,images:0});
+    a.cost   += Number(r.cost)||0;
+    a.images += Number(r.images)||0;
+  });
+  return periodsOf().map(p=>{
+    const a=acc[p];
+    if(!a) return null;
+    if(metric.id==="cost")   return a.cost;
+    if(metric.id==="images") return a.images;
+    return a.images ? a.cost/a.images : null;     // cost per image
+  });
 }
 
 /* ---------- selectors ---------- */
@@ -685,6 +915,7 @@ function aggSeries(laneId, colName, mode, regionsOverride){
   });
 }
 function metricSeries(laneId, metric, prefix, regionsOverride){
+  if(metric.src==="bq") return costSeries(laneId, metric, prefix, regionsOverride);
   const px = prefix!=null ? prefix : segPrefix();
   if(metric.agg==="ratio"){
     const n=aggSeries(laneId, px+metric.num, "sum", regionsOverride);
@@ -963,6 +1194,8 @@ function controlsHTML(){
     '<div class="ctl"><span>Segment</span><div class="chips">'+
       SEGMENTS.map(s=>'<button class="chip" data-seg="'+s.id+'" aria-pressed="'+(s.id===state.segment)+'">'+esc(s.label)+'</button>').join("")+
     '</div></div>'+
+    (COST && !state.cost ? '<div class="ctl"><button class="chip" id="bqBtn">'+
+       (state.costError ? "Cost unavailable \u2014 retry" : "Connect BigQuery for cost")+'</button></div>' : '')+
     (regs.length?'<div class="ctl"><span>Regions</span><div class="chips">'+
       regs.map(r=>'<button class="chip" data-region="'+esc(r)+'" aria-pressed="'+regSet().has(r)+'">'+esc(r)+'</button>').join("")+
       '</div><button class="linky" id="regAll">'+(regSet().size===regs.length?"Clear all":"Select all")+'</button></div>':'')+
@@ -1125,7 +1358,11 @@ function drillHTML(){
       html+='<tr>'+(mi===0?'<td rowspan="'+metricsOf().length+'" style="font-weight:600;vertical-align:top">'+esc(s.label)+'</td>':'')+
         '<td style="color:var(--ink-2)">'+esc(m.label)+'</td>'+
         periods.map(p=>{
-          const r=byPeriod.get(p), v=r?valueAt(r,m,s.prefix):null;
+          let v;
+          if(m.src==="bq"){
+            const i=periods.indexOf(p);
+            v=metricSeries("region",m,s.prefix,[state.drillRegion])[i];
+          } else { const r=byPeriod.get(p); v=r?valueAt(r,m,s.prefix):null; }
           return '<td class="num">'+fmt(m,v)+'</td>';
         }).join("")+'</tr>';
     });
@@ -1258,6 +1495,14 @@ function footHTML(){
 
 /* ---------- events ---------- */
 function wire(){
+  const bqb=document.getElementById("bqBtn");
+  if(bqb) bqb.onclick=async()=>{
+    bqb.textContent="Connecting\u2026"; bqb.disabled=true;
+    try{ BQ.token=await bqToken(true); state.costError=null; }
+    catch(e){ state.costError="Sign-in for BigQuery didn\u2019t complete."; }
+    state.cost=await loadCost();
+    render();
+  };
   document.querySelectorAll("[data-card]").forEach(b=>b.onclick=()=>{
     const id=b.dataset.card;
     if(state.hiddenCards.has(id)) state.hiddenCards.delete(id); else state.hiddenCards.add(id);
