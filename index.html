@@ -42,12 +42,12 @@ select{font:inherit;color:inherit}
 .mast-in{max-width:1520px;margin:0 auto;padding:20px 24px 0;display:flex;flex-wrap:wrap;gap:20px;align-items:flex-end;justify-content:space-between}
 .mast h1{margin:0;font-size:21px;font-weight:600;letter-spacing:-.01em;color:#fff}
 .mast p{margin:3px 0 0;font-size:13px;color:#9DB4B1;max-width:62ch}
-.sync{display:flex;align-items:center;gap:12px;padding-bottom:14px}
-.sync-txt{font-size:12px;color:#9DB4B1}
-.btn{background:#17423F;border:1px solid #2C5A56;color:#DCEAE8;padding:7px 14px;border-radius:var(--r-pill);font-size:13px;font-weight:500}
+.sync{display:flex;align-items:center;gap:14px;padding-bottom:14px;line-height:1}
+.sync-txt{font-size:12px;color:#9DB4B1;display:inline-flex;align-items:center;line-height:1}
+.btn{background:#17423F;border:1px solid #2C5A56;color:#DCEAE8;padding:8px 16px;border-radius:var(--r-pill);font-size:13px;font-weight:500;line-height:1}
 .btn:hover{background:#1E514D}
 .btn[disabled]{opacity:.55;cursor:progress}
-.dot{width:7px;height:7px;border-radius:50%;background:#3FBF8F;display:inline-block;margin-right:7px;vertical-align:1px}
+.dot{width:7px;height:7px;border-radius:50%;background:#3FBF8F;display:inline-block;margin-right:7px;flex:0 0 auto}
 .dot.err{background:#E0705F}
 
 /* product tabs */
@@ -148,12 +148,13 @@ tbody tr[aria-selected="true"]{background:var(--teal-soft);box-shadow:inset 2px 
 .gate-card p{margin:0 0 22px;font-size:13.5px;color:var(--muted);line-height:1.55}
 .gsi-slot{display:flex;justify-content:center;min-height:44px}
 .gate-err{margin:18px 0 0!important;color:var(--down);font-size:13px}
-.who{display:flex;align-items:center;gap:9px;padding-bottom:14px}
-.who-mail{font-size:12px;color:#9DB4B1}
-.role{font-size:10.5px;font-weight:600;letter-spacing:.04em;padding:2px 8px;border-radius:var(--r-pill);
-  background:#2A5F5B;color:#BFE0DC;text-transform:uppercase}
+.who{display:flex;align-items:center;gap:10px;line-height:1}
+.who:not(:empty)::after{content:"";width:1px;height:16px;background:#2C5A56;margin-left:4px}
+.who-mail{font-size:12px;color:#9DB4B1;line-height:1}
+.role{font-size:10.5px;font-weight:600;letter-spacing:.04em;padding:4px 9px;border-radius:var(--r-pill);
+  background:#2A5F5B;color:#BFE0DC;text-transform:uppercase;line-height:1}
 .role.admin{background:#3FBF8F;color:#0C2E2C}
-.linky-dark{background:none;border:0;color:#9DB4B1;font-size:12px;text-decoration:underline;padding:0}
+.linky-dark{background:none;border:0;color:#9DB4B1;font-size:12px;text-decoration:underline;padding:0;line-height:1}
 .linky-dark:hover{color:#DCEAE8}
 .admin-tag{font-size:10.5px;font-weight:600;letter-spacing:.04em;padding:2px 8px;border-radius:var(--r-pill);
   background:var(--teal-soft);color:var(--teal);text-transform:uppercase;margin-left:8px}
@@ -236,12 +237,22 @@ let   ACCESS_CONTACT   = "praveen@spyne.ai";       // where access requests are 
 let   LOGIN_LOG        = null;
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit";
 
+/* agg says how a metric combines across regions: "mean" for rates (the default),
+   "sum" for totals, "ratio" for one total divided by another.
+   needs lists the sheet columns required - a metric with a missing column is
+   simply not offered, so cost appears on its own once the columns land.        */
 function mkMetrics(lastId,lastLabel){
   return [
     { id:"sla_pct",     label:"SLA met",   kind:"pct", better:"high" },
     { id:"p99_tat_hrs", label:"TAT (P99)", kind:"hrs", better:"low"  },
     { id:"p95_tat_hrs", label:"TAT (P95)", kind:"hrs", better:"low"  },
-    { id:lastId,        label:lastLabel,   kind:"pct", better:"high" }
+    { id:lastId,        label:lastLabel,   kind:"pct", better:"high" },
+    { id:"cost",        label:"QC cost",   kind:"inr", better:"low",  agg:"sum",
+      needs:["cost"] },
+    { id:"cost_per_image", label:"Cost / image", kind:"inr2", better:"low", agg:"ratio",
+      num:"cost", den:"images", needs:["cost","images"] },
+    { id:"images",      label:"Volume",    kind:"int", better:"high", agg:"sum",
+      needs:["images"] }
   ];
 }
 
@@ -252,7 +263,7 @@ const PRODUCTS = [
       { id:"rt",     label:"Rooftop", sheet:"images_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
       { id:"region", label:"Region",  sheet:"images_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
-  { id:"spin", label:"360", status:"live", metrics:mkMetrics("delivery_pct","Delivery"),
+  { id:"spin", label:"360", status:"live", metrics:mkMetrics("delivery_pct","Fulfilment"),
     lanes:[
       { id:"spin",   label:"Spin",    sheet:"360_spin",   color:"var(--s1)", blurb:"Every spin delivered" },
       { id:"rt",     label:"Rooftop", sheet:"360_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
@@ -276,8 +287,37 @@ const SEGMENTS = [
 
 const METRICS = PRODUCTS[0].metrics;
 /* Each product names its own metrics — images reports fulfilment, 360 reports delivery. */
-function metricsOf(){ return (PRODUCTS.find(p=>p.id===state.product)||{}).metrics || METRICS; }
+function hasCol(name){
+  const ls=lanesOf();
+  for(let i=0;i<ls.length;i++){
+    const rows=raw(ls[i].id);
+    for(let j=0;j<rows.length;j++) if(rows[j].v[name]!=null) return true;
+  }
+  return false;
+}
+function metricsOf(){
+  const base=(PRODUCTS.find(p=>p.id===state.product)||{}).metrics || METRICS;
+  return base.filter(m=>!m.needs || m.needs.every(hasCol));
+}
 function metricById(id){ const l=metricsOf(); return l.find(m=>m.id===id) || l[0]; }
+/* The same measure has a different column name per product (fulfillment_pct vs
+   delivery_pct), so match on the label to keep the selection when tabs change. */
+function labelOfMetricId(id){
+  for(let i=0;i<PRODUCTS.length;i++){
+    const ms=PRODUCTS[i].metrics;
+    if(!ms) continue;
+    const m=ms.find(x=>x.id===id);
+    if(m) return m.label;
+  }
+  return null;
+}
+function remapMetric(id){
+  const ms=metricsOf();
+  if(ms.some(m=>m.id===id)) return id;
+  const lab=labelOfMetricId(id);
+  const hit=lab ? ms.find(m=>m.label===lab) : null;
+  return hit ? hit.id : ms[0].id;
+}
 
 const SERIES_COLORS = ["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--s5)"];
 
@@ -620,6 +660,48 @@ function regionSeries(colName, regionFilter){
     return a&&a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
   });
 }
+function segPrefix(){ return (SEGMENTS.find(s=>s.id===state.segment)||SEGMENTS[0]).prefix; }
+/* Combine one column across the periods in view. Rates average across regions,
+   totals add up - averaging a cost would understate it badly. */
+function aggSeries(laneId, colName, mode, regionsOverride){
+  if(laneId!=="region"){
+    const map=new Map(rowsFor(laneId).map(r=>[r.period, r.v[colName]]));
+    return periodsOf().map(p=>{ const v=map.get(p); return (v==null||isNaN(v))?null:v; });
+  }
+  const keep=regionsOverride||activeRegions();
+  const byPeriod=new Map();
+  rowsFor("region").forEach(r=>{
+    if(keep.indexOf(r.region)<0) return;
+    const v=r.v[colName];
+    if(v==null||isNaN(v)) return;
+    if(!byPeriod.has(r.period)) byPeriod.set(r.period,[]);
+    byPeriod.get(r.period).push(v);
+  });
+  return periodsOf().map(p=>{
+    const a=byPeriod.get(p);
+    if(!a||!a.length) return null;
+    const total=a.reduce((x,y)=>x+y,0);
+    return mode==="sum" ? total : total/a.length;
+  });
+}
+function metricSeries(laneId, metric, prefix, regionsOverride){
+  const px = prefix!=null ? prefix : segPrefix();
+  if(metric.agg==="ratio"){
+    const n=aggSeries(laneId, px+metric.num, "sum", regionsOverride);
+    const d=aggSeries(laneId, px+metric.den, "sum", regionsOverride);
+    return n.map((v,i)=> (v==null||d[i]==null||!d[i]) ? null : v/d[i]);
+  }
+  return aggSeries(laneId, px+metric.id, metric.agg||"mean", regionsOverride);
+}
+function valueAt(row, metric, prefix){
+  const px = prefix!=null ? prefix : segPrefix();
+  if(metric.agg==="ratio"){
+    const n=row.v[px+metric.num], d=row.v[px+metric.den];
+    return (n==null||d==null||!d||isNaN(n)||isNaN(d)) ? null : n/d;
+  }
+  const v=row.v[px+metric.id];
+  return (v==null||isNaN(v)) ? null : v;
+}
 function laneSeries(laneId, colName){
   if(laneId==="region") return regionSeries(colName);
   const map=new Map(rowsFor(laneId).map(r=>[r.period, r.v[colName]]));
@@ -635,15 +717,24 @@ function lastTwo(series){
 /* ---------- formatting ---------- */
 function fmt(metric,v){
   if(v==null||isNaN(v)) return "\u2014";
-  if(metric.kind==="pct") return v.toFixed(1)+"%";
+  if(metric.kind==="pct")  return v.toFixed(1)+"%";
+  if(metric.kind==="int")  return Math.round(v).toLocaleString("en-IN");
+  if(metric.kind==="inr2") return "\u20b9"+v.toFixed(2);
+  if(metric.kind==="inr"){
+    if(v>=1e7) return "\u20b9"+(v/1e7).toFixed(2)+" Cr";
+    if(v>=1e5) return "\u20b9"+(v/1e5).toFixed(2)+" L";
+    return "\u20b9"+Math.round(v).toLocaleString("en-IN");
+  }
   return v>=100 ? Math.round(v).toLocaleString("en-IN")+"h" : v.toFixed(1)+"h";
 }
 function fmtDelta(metric,cur,prev){
   if(cur==null||prev==null) return null;
   const d=cur-prev;
-  const txt = metric.kind==="pct"
-    ? (d>=0?"+":"\u2212")+Math.abs(d).toFixed(1)+" pp"
-    : (d>=0?"+":"\u2212")+(Math.abs(d)>=100?Math.round(Math.abs(d)):Math.abs(d).toFixed(1))+"h";
+  const sign=d>=0?"+":"\u2212", a=Math.abs(d);
+  const txt = metric.kind==="pct" ? sign+a.toFixed(1)+" pp"
+    : (metric.kind==="inr"||metric.kind==="inr2"||metric.kind==="int")
+      ? sign+fmt(metric,a).replace("\u20b9","\u20b9")
+      : sign+(a>=100?Math.round(a):a.toFixed(1))+"h";
   const good = metric.better==="high" ? d>0 : d<0;
   const tone = Math.abs(d)<0.05 ? "flat" : (good?"up":"down");
   return { txt, tone };
@@ -799,9 +890,8 @@ function render(){
       '</div>';
     return;
   }
-  const ms=metricsOf();
-  if(!ms.some(m=>m.id===state.trendMetric))  state.trendMetric=ms[0].id;
-  if(!ms.some(m=>m.id===state.matrixMetric)) state.matrixMetric=ms[0].id;
+  state.trendMetric  = remapMetric(state.trendMetric);
+  state.matrixMetric = remapMetric(state.matrixMetric);
   if(!laneById(state.matrixLane))  state.matrixLane=lanesOf()[0].id;
   if(!laneById(state.recordsLane)){ state.recordsLane=lanesOf()[0].id; state.sortCol=null; }
   if(state.loading && !raw(lanesOf()[0].id).length){
@@ -895,10 +985,11 @@ function glanceHTML(){
       esc(lane.label)+'</h3><span class="sub">'+esc(lane.blurb)+
       (lane.id==="region"?' \u00b7 '+activeRegions().length+' selected':'')+'</span></div><div class="cards">';
     metricsOf().filter(m=>!state.hiddenCards.has(m.id)).forEach(m=>{
-      const series=laneSeries(lane.id,col(m.id));
+      const series=metricSeries(lane.id,m);
       const t=lastTwo(series), d=fmtDelta(m,t.cur,t.prev);
       html+='<article class="card"><div class="card-top"><span class="name">'+esc(m.label)+
-        (lane.id==="region"?' <span style="font-weight:400;color:var(--muted)">avg</span>':'')+'</span>'+
+        (lane.id==="region"?' <span style="font-weight:400;color:var(--muted)">'+
+          ((m.agg==="sum")?"total":"avg")+'</span>':'')+'</span>'+
         '<span style="display:flex;align-items:center;gap:8px">'+
         (d?'<span class="delta '+d.tone+'">'+d.txt+'</span>':'')+
         '<button class="hide-x" data-card="'+m.id+'" title="Hide this card" aria-label="Hide '+esc(m.label)+'">\u00d7</button>'+
@@ -915,11 +1006,12 @@ function glanceHTML(){
 function trendSeries(){
   const m=metricById(state.trendMetric);
   const c=col(m.id);
+  const roll = m.agg==="mean"||!m.agg ? " (avg)" : " (total)";
   if(state.trendSplit==="lane")
-    return lanesOf().map(l=>({ name:l.label+(l.id==="region"?" (avg)":""), values:laneSeries(l.id,c) }));
+    return lanesOf().map(l=>({ name:l.label+(l.id==="region"?roll:""), values:metricSeries(l.id,m) }));
   if(state.trendSplit==="segment")
-    return SEGMENTS.map(s=>({ name:s.label, values:laneSeries(state.matrixLane,s.prefix+m.id) }));
-  return activeRegions().map(r=>({ name:r, values:regionSeries(c,[r]) }));
+    return SEGMENTS.map(s=>({ name:s.label, values:metricSeries(state.matrixLane,m,s.prefix) }));
+  return activeRegions().map(r=>({ name:r, values:metricSeries("region",m,null,[r]) }));
 }
 function trendHTML(){
   const m=metricById(state.trendMetric);
@@ -982,7 +1074,7 @@ function matrixHTML(){
   /* region × period */
   const rVals=[];
   const rRows=regs.map(r=>{
-    const vals=regionSeries(col(m.id),[r]);
+    const vals=metricSeries("region",m,null,[r]);
     vals.forEach(v=>{ if(v!=null) rVals.push(v); });
     return { name:r, vals:vals };
   });
@@ -991,7 +1083,7 @@ function matrixHTML(){
   /* segment × period for the chosen cut */
   const sVals=[];
   const sRows=SEGMENTS.map(s=>{
-    const vals=laneSeries(state.matrixLane,s.prefix+m.id);
+    const vals=metricSeries(state.matrixLane,m,s.prefix);
     vals.forEach(v=>{ if(v!=null) sVals.push(v); });
     return { name:s.label, vals:vals };
   });
@@ -1033,7 +1125,7 @@ function drillHTML(){
       html+='<tr>'+(mi===0?'<td rowspan="'+metricsOf().length+'" style="font-weight:600;vertical-align:top">'+esc(s.label)+'</td>':'')+
         '<td style="color:var(--ink-2)">'+esc(m.label)+'</td>'+
         periods.map(p=>{
-          const r=byPeriod.get(p), v=r?r.v[s.prefix+m.id]:null;
+          const r=byPeriod.get(p), v=r?valueAt(r,m,s.prefix):null;
           return '<td class="num">'+fmt(m,v)+'</td>';
         }).join("")+'</tr>';
     });
@@ -1094,7 +1186,7 @@ function recordsHTML(){
 
 /* ADMIN ONLY - what the sheets actually delivered, for spotting gaps at source. */
 function healthHTML(){
-  const ms=metricsOf(), cols=ms.map(m=>m.id);
+  const ms=metricsOf(), cols=ms.filter(m=>m.agg!=="ratio").map(m=>m.id);
   const rows=lanesOf().map(l=>{
     const all=raw(l.id);
     let cells=0, blanks=0;
