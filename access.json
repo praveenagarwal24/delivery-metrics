@@ -1,0 +1,6 @@
+{
+  "users": [
+    { "email": "praveen@spyne.ai", "role": "admin" },
+    { "email": "teammate@spyne.ai", "role": "viewer" }
+  ]
+}
