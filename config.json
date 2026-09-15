@@ -2,5 +2,14 @@
   "clientId": "901106520525-esbje4h736ogtssddoiinflf56tb1gfb.apps.googleusercontent.com",
   "allowedDomains": ["spyne.ai", "spyne.co.in"],
   "admins": ["praveen@spyne.ai"],
-  "contact": "praveen@spyne.ai"
+  "contact": "praveen@spyne.ai",
+
+  "loginLog": {
+    "formUrl": "https://docs.google.com/forms/d/e/1FAIpQLSe3uAWw00zl3t-E2MlQpAdr36E7Tb0naR0GB6Iz6YEdp9Pdow/formResponse",
+    "fields": {
+      "email": "entry.14012590",
+      "role": "entry.1854232559"
+    },
+    "sheetName": "Form Responses 1"
+  }
 }
