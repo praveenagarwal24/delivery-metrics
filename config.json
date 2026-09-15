@@ -1,0 +1,6 @@
+{
+  "clientId": "PASTE_YOUR_CLIENT_ID_HERE.apps.googleusercontent.com",
+  "allowedDomains": ["spyne.ai", "spyne.co.in"],
+  "admins": ["praveen@spyne.ai"],
+  "contact": "praveen@spyne.ai"
+}
