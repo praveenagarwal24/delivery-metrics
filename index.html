@@ -207,7 +207,16 @@ const SHEET_ID = "16vFElbOV8Awd63R6-WlsNdAScWNE18xGUPFkzE0GN7c";
    and the sheets stay link-readable. Don't treat it as access control.        */
 const GOOGLE_CLIENT_ID = "";                       // <-- paste Client ID here
 const ALLOWED_DOMAINS  = ["spyne.ai","spyne.co.in"];
-const ADMINS           = ["praveen@spyne.ai"];     // add more admin emails here
+const ADMINS           = ["praveen@spyne.ai"];     // always admin, even if the sheet says otherwise
+/* Per-person access lives in access.json, sitting next to this file in the repo,
+   so adding someone is a small commit rather than an edit to this whole page:
+     { "users": [ {"email":"praveen@spyne.ai","role":"admin"},
+                  {"email":"someone@spyne.ai","role":"viewer"} ] }
+   role is "admin" or "viewer" (anything else reads as viewer).
+   If the file is missing, the dashboard falls back to letting any
+   ALLOWED_DOMAINS address in — so nothing breaks before you create it.        */
+const ACCESS_FILE      = "access.json";
+const ACCESS_CONTACT   = "praveen@spyne.ai";       // where access requests are sent
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit";
 
 function mkMetrics(lastId,lastLabel){
@@ -263,7 +272,7 @@ const state = {
   matrixMetric:"sla_pct", matrixLane:"vin",
   drillRegion:null, recordsLane:"vin", recordsQuery:"", hidden:new Set(),
   sortCol:null, sortDir:-1,
-  data:{}, loading:false, error:null, synced:null, user:null
+  data:{}, loading:false, error:null, synced:null, user:null, access:null, denied:false
 };
 function isAdmin(){ return !!(state.user && state.user.admin); }
 /* Sheets are cached per product, so 360's rooftop rows never overwrite images'. */
@@ -316,7 +325,7 @@ function restoreSession(){
 function signOut(){
   try{ sessionStorage.removeItem("dm_cred"); }catch(e){}
   try{ if(window.google&&google.accounts&&google.accounts.id) google.accounts.id.disableAutoSelect(); }catch(e){}
-  state.user=null; state.data={}; state.synced=null;
+  state.user=null; state.data={}; state.synced=null; state.access=null; state.denied=false;
   showGate();
 }
 function showGate(){
@@ -343,8 +352,52 @@ function waitForGsi(tries){
   if(tries>40) return gateError("Couldn\u2019t reach Google sign-in. Check the connection and reload.");
   setTimeout(()=>waitForGsi(tries+1),150);
 }
-function showApp(){
+/* Reads access.json from the repo. Returns null when there isn't one, which
+   means "fall back to domain-only" rather than "nobody gets in". */
+async function loadAccess(){
+  try{
+    const res=await fetch(ACCESS_FILE+"?_="+Date.now(),{cache:"no-store"});
+    if(!res.ok) return null;
+    const j=await res.json();
+    const list=Array.isArray(j) ? j : (j&&Array.isArray(j.users) ? j.users : null);
+    if(!list) return null;
+    const out=[];
+    list.forEach(u=>{
+      const email=String((u&&(u.email||u))||"").trim().toLowerCase();
+      if(!email || email.indexOf("@")<0) return;
+      const role=String((u&&u.role)||"viewer").trim().toLowerCase();
+      out.push({ email:email, role:role });
+    });
+    return out.length ? out : null;
+  }catch(e){ return null; }
+}
+function showDenied(){
+  state.denied=true;
+  renderTabs(); renderSync();
+  const mail="mailto:"+ACCESS_CONTACT+
+    "?subject="+encodeURIComponent("Delivery Metrics \u2014 access request")+
+    "&body="+encodeURIComponent("Hi Praveen,\n\nPlease give me access to the Delivery Metrics dashboard.\n\nAccount: "+
+      state.user.email+"\nWhat I need it for: \n\nThanks");
+  document.getElementById("main").innerHTML=
+    '<div class="state" style="margin-top:48px"><h3>You\u2019re not on the access list yet</h3>'+
+    '<p>'+esc(state.user.email)+' signed in fine, but hasn\u2019t been given access to this dashboard. '+
+    'Send a request and it\u2019ll land in '+esc(ACCESS_CONTACT)+'\u2019s inbox.</p>'+
+    '<p style="margin-top:18px"><a class="btn" style="background:var(--teal);border-color:var(--teal);color:#fff;'+
+      'text-decoration:none;display:inline-block" href="'+mail+'">Request access</a>'+
+    '<button class="linky" id="denySignOut" style="margin-left:18px">Sign in as someone else</button></p></div>';
+  const so=document.getElementById("denySignOut");
+  if(so) so.onclick=signOut;
+}
+async function showApp(){
   document.getElementById("gate").hidden=true;
+  state.denied=false;
+  state.access=await loadAccess();
+  const forcedAdmin=ADMINS.indexOf(state.user.email)>=0;
+  if(state.access){
+    const hit=state.access.find(a=>a.email===state.user.email);
+    if(!hit && !forcedAdmin) return showDenied();
+    state.user.admin = forcedAdmin || (hit && hit.role==="admin");
+  }
   render();
   loadAll();
 }
@@ -705,7 +758,7 @@ function render(){
 }
 
 function renderTabs(){
-  if(!state.user){ document.getElementById("prodTabs").innerHTML=""; return; }
+  if(!state.user || state.denied){ document.getElementById("prodTabs").innerHTML=""; return; }
   document.getElementById("prodTabs").innerHTML=PRODUCTS.map(p=>
     '<button class="prod" role="tab" data-prod="'+p.id+'" aria-selected="'+(p.id===state.product)+'">'+
       esc(p.label)+'<span class="tag">'+(p.status==="live"?"Live":"Soon")+'</span></button>').join("");
@@ -721,7 +774,8 @@ function renderSync(){
   const btn=document.getElementById("refreshBtn");
   const who=document.getElementById("who");
   if(!state.user){ el.innerHTML=""; btn.hidden=true; if(who) who.innerHTML=""; return; }
-  btn.hidden=false;
+  btn.hidden=!!state.denied;
+  if(state.denied) el.innerHTML="";
   if(who){
     who.innerHTML='<span class="who-mail">'+esc(state.user.email)+'</span>'+
       '<span class="role'+(state.user.admin?" admin":"")+'">'+(state.user.admin?"Admin":"Viewer")+'</span>'+
@@ -986,8 +1040,14 @@ function healthHTML(){
       '<td class="num"'+(blanks?' style="color:var(--down);font-weight:600"':'')+'>'+
         blanks+(cells?' <span style="color:var(--muted);font-weight:400">of '+cells+'</span>':'')+'</td></tr>';
   }).join("");
+  const acc = state.access
+    ? state.access.length+' people in '+ACCESS_FILE+' \u00b7 '+
+      state.access.filter(a=>a.role==="admin").length+' admin'
+    : 'No '+ACCESS_FILE+' found \u2014 any '+ALLOWED_DOMAINS.join(" / ")+' address can sign in';
   return '<div class="sec"><h2>Data health<span class="admin-tag">Admin</span></h2>'+
     '<span class="note">What each sheet returned on the last sync. Blanks are missing metric cells, not zeros.</span></div>'+
+    '<div class="panel" style="margin-bottom:18px"><div class="panel-hd" style="margin:0">'+
+      '<h3>Access</h3><span class="note">'+esc(acc)+'</span></div></div>'+
     '<div class="panel"><div class="scroll" style="max-height:none"><table class="records">'+
     '<tr><th>Cut</th><th style="text-align:left">Sheet</th><th>Rows</th><th>Weekly</th><th>Monthly</th><th>Regions</th><th>Blank cells</th></tr>'+
     '<tbody>'+rows+'</tbody></table></div></div>';
