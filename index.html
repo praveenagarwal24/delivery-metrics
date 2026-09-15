@@ -224,6 +224,16 @@ let   ADMINS           = ["praveen@spyne.ai"];     // always admin, whatever acc
    ALLOWED_DOMAINS address in — so nothing breaks before you create it.        */
 const ACCESS_FILE      = "access.json";
 let   ACCESS_CONTACT   = "praveen@spyne.ai";       // where access requests are sent
+/* Sign-in logging. A Google Form is the write endpoint - the page posts each
+   sign-in to it and the responses land in a tab of the workbook, which the
+   admin panel reads back. Set this block in config.json:
+     "loginLog": {
+       "formUrl": "https://docs.google.com/forms/d/e/FORM_ID/formResponse",
+       "fields":  { "email": "entry.111111", "role": "entry.222222" },
+       "sheetName": "Form Responses 1"
+     }
+   Leave it out and the logging simply doesn't run.                            */
+let   LOGIN_LOG        = null;
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit";
 
 function mkMetrics(lastId,lastLabel){
@@ -279,7 +289,7 @@ const state = {
   matrixMetric:"sla_pct", matrixLane:"vin",
   drillRegion:null, recordsLane:"vin", recordsQuery:"", hidden:new Set(),
   sortCol:null, sortDir:-1,
-  data:{}, loading:false, error:null, synced:null, user:null, access:null, denied:false
+  data:{}, loading:false, error:null, synced:null, user:null, access:null, denied:false, loginLog:null
 };
 function isAdmin(){ return !!(state.user && state.user.admin); }
 /* Sheets are cached per product, so 360's rooftop rows never overwrite images'. */
@@ -291,6 +301,17 @@ function regSet(){
 }
 
 /* ---------- sign-in ---------- */
+/* Fire-and-forget: a Google Form accepts a cross-origin POST but answers
+   opaquely, so we can't confirm it landed. Never block sign-in on it. */
+function logSignIn(user){
+  if(!LOGIN_LOG || !LOGIN_LOG.formUrl || !LOGIN_LOG.fields) return;
+  try{
+    const body=new URLSearchParams();
+    if(LOGIN_LOG.fields.email) body.append(LOGIN_LOG.fields.email, user.email);
+    if(LOGIN_LOG.fields.role)  body.append(LOGIN_LOG.fields.role, user.admin?"admin":"viewer");
+    fetch(LOGIN_LOG.formUrl,{method:"POST",mode:"no-cors",body:body}).catch(function(){});
+  }catch(e){ /* logging must never break sign-in */ }
+}
 /* Anything config.json sets wins over the defaults above. A missing or broken
    file is not fatal - we just keep the defaults. */
 async function loadConfig(){
@@ -304,6 +325,7 @@ async function loadConfig(){
     if(c && Array.isArray(c.admins) && c.admins.length)
       ADMINS=c.admins.map(e=>String(e).trim().toLowerCase()).filter(Boolean);
     if(c && typeof c.contact==="string" && c.contact.trim()) ACCESS_CONTACT=c.contact.trim();
+    if(c && c.loginLog && c.loginLog.formUrl && c.loginLog.fields) LOGIN_LOG=c.loginLog;
   }catch(e){ /* keep defaults */ }
 }
 function decodeJwt(tok){
@@ -329,7 +351,7 @@ function acceptCredential(resp){
   state.user={ email:email, name:p.name||email, admin:ADMINS.indexOf(email)>=0, exp:p.exp };
   try{ sessionStorage.setItem("dm_cred",resp.credential); }catch(e){}
   gateError("");
-  showApp();
+  showApp(true);
 }
 function restoreSession(){
   let tok=null;
@@ -410,7 +432,7 @@ function showDenied(){
   const so=document.getElementById("denySignOut");
   if(so) so.onclick=signOut;
 }
-async function showApp(){
+async function showApp(fresh){
   document.getElementById("gate").hidden=true;
   state.denied=false;
   state.access=await loadAccess();
@@ -420,6 +442,7 @@ async function showApp(){
     if(!hit && !forcedAdmin) return showDenied();
     state.user.admin = forcedAdmin || (hit && hit.role==="admin");
   }
+  if(fresh) logSignIn(state.user);   // only on a real sign-in, not a session restore
   render();
   loadAll();
 }
@@ -524,8 +547,30 @@ async function loadAll(){
       state.regionsInit[state.product]=true;
     }
     state.synced=new Date();
+    if(isAdmin() && LOGIN_LOG && LOGIN_LOG.sheetName){
+      try{ state.loginLog=await loadLoginLog(); }catch(e){ state.loginLog=null; }
+    }
   }catch(err){ state.error=err.message||String(err); }
   state.loading=false; render();
+}
+
+/* Reads the form's response tab back. Columns are matched by header text so it
+   survives Google's default "Timestamp" naming or anything you rename them to. */
+async function loadLoginLog(){
+  const t=await fetchTable(LOGIN_LOG.sheetName);
+  const labels=t.cols.map(c=>String(c.label||"").trim().toLowerCase());
+  const find=frag=>labels.findIndex(l=>l.indexOf(frag)>=0);
+  const ti=find("time")>=0?find("time"):0, ei=find("mail"), ri=find("role");
+  const cell=(r,i)=> (i>=0 && r.c && r.c[i] && r.c[i].v!=null) ? r.c[i].v : null;
+  const out=[];
+  t.rows.forEach(r=>{
+    const em=cell(r,ei);
+    if(!em) return;
+    out.push({ at:toDate(cell(r,ti)), email:String(em).trim().toLowerCase(),
+               role:ri>=0 ? String(cell(r,ri)||"").trim() : "" });
+  });
+  out.sort((a,b)=> (a.at&&b.at) ? b.at-a.at : 0);
+  return out;
 }
 
 /* ---------- selectors ---------- */
@@ -773,7 +818,7 @@ function render(){
     glanceHTML() +
     trendHTML() +
     matrixHTML() +
-    (isAdmin() ? healthHTML() + recordsHTML() : "") +
+    (isAdmin() ? healthHTML() + recordsHTML() + loginLogHTML() : "") +
     footHTML();
   wire();
   syncSticky();
@@ -1073,6 +1118,38 @@ function healthHTML(){
     '<div class="panel"><div class="scroll" style="max-height:none"><table class="records">'+
     '<tr><th>Cut</th><th style="text-align:left">Sheet</th><th>Rows</th><th>Weekly</th><th>Monthly</th><th>Regions</th><th>Blank cells</th></tr>'+
     '<tbody>'+rows+'</tbody></table></div></div>';
+}
+
+/* ADMIN ONLY - who signed in and when. */
+function loginLogHTML(){
+  if(!LOGIN_LOG){
+    return '<div class="sec"><h2>Sign-in log<span class="admin-tag">Admin</span></h2></div>'+
+      '<div class="panel"><p style="margin:0;font-size:13px;color:var(--muted)">'+
+      'Not set up yet \u2014 add a <code>loginLog</code> block to '+CONFIG_FILE+' pointing at a Google Form.'+
+      '</p></div>';
+  }
+  const rows=state.loginLog;
+  if(!rows) return '<div class="sec"><h2>Sign-in log<span class="admin-tag">Admin</span></h2></div>'+
+    '<div class="panel"><p style="margin:0;font-size:13px;color:var(--muted)">'+
+    'Couldn\u2019t read \u201c'+esc(LOGIN_LOG.sheetName||"")+'\u201d. Check the tab name and that the workbook is link-readable.</p></div>';
+
+  const cut=Date.now()-7*864e5;
+  const recent=rows.filter(r=>r.at && r.at.getTime()>=cut);
+  const people=new Set(recent.map(r=>r.email));
+  const body=rows.slice(0,60).map(r=>
+    '<tr><td class="num" style="text-align:left">'+
+      (r.at ? esc(r.at.toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})) : "\u2014")+
+    '</td><td style="text-align:left">'+esc(r.email)+'</td>'+
+    '<td style="text-align:left;color:var(--muted)">'+esc(r.role||"\u2014")+'</td></tr>').join("");
+
+  return '<div class="sec"><h2>Sign-in log<span class="admin-tag">Admin</span></h2>'+
+    '<span class="note">'+recent.length+' sign-in'+(recent.length===1?"":"s")+' from '+people.size+
+    ' '+(people.size===1?"person":"people")+' in the last 7 days \u00b7 showing the most recent '+
+    Math.min(60,rows.length)+' of '+rows.length+'</span></div>'+
+    '<div class="panel"><div class="scroll"><table class="records">'+
+    '<tr><th style="text-align:left">When</th><th style="text-align:left">Account</th><th style="text-align:left">Role</th></tr>'+
+    '<tbody>'+(body||'<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:24px">No sign-ins recorded yet</td></tr>')+
+    '</tbody></table></div></div>';
 }
 
 function footHTML(){
