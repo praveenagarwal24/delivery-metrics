@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivery Metrics — Images</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;450;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --canvas:#ECEFEE; --panel:#FFFFFF; --panel-sunk:#F4F6F5;
+  --ink:#0F1E1C; --ink-2:#334744; --muted:#6B7B78; --hair:#DCE3E1; --hair-strong:#C4CFCC;
+  --teal:#12706B; --teal-soft:#E3EFEE; --deep:#0C2E2C;
+  --up:#1B7A46; --down:#B3261E; --flat:#7A8683;
+  --s1:#12706B; --s2:#2C5F8A; --s3:#7A3E6D; --s4:#A5761B; --s5:#55636B;
+  --r-card:10px; --r-panel:14px; --r-pill:999px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--canvas); color:var(--ink);
+  font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  font-size:14px; line-height:1.45; -webkit-font-smoothing:antialiased;
+}
+.num{font-variant-numeric:tabular-nums lining-nums}
+button{font:inherit;color:inherit;cursor:pointer}
+select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--teal);outline-offset:2px;border-radius:4px}
+.wrap{max-width:1520px;margin:0 auto;padding:0 24px 64px}
+
+/* ---------- masthead ---------- */
+.mast{background:var(--deep);color:#E7EFEE;position:sticky;top:0;z-index:40;
+  transition:padding .16s ease,box-shadow .16s ease}
+.mast.compact{box-shadow:0 6px 18px rgba(12,46,44,.22)}
+.mast.compact .mast-in{padding-top:11px}
+.mast.compact h1{font-size:17px}
+.mast.compact p{display:none}
+.mast.compact .prods{padding-top:9px}
+.mast.compact .prod{padding:7px 18px 9px}
+.mast-in{max-width:1520px;margin:0 auto;padding:20px 24px 0;display:flex;flex-wrap:wrap;gap:20px;align-items:flex-end;justify-content:space-between}
+.mast h1{margin:0;font-size:21px;font-weight:600;letter-spacing:-.01em;color:#fff}
+.mast p{margin:3px 0 0;font-size:13px;color:#9DB4B1;max-width:62ch}
+.sync{display:flex;align-items:center;gap:12px;padding-bottom:14px}
+.sync-txt{font-size:12px;color:#9DB4B1}
+.btn{background:#17423F;border:1px solid #2C5A56;color:#DCEAE8;padding:7px 14px;border-radius:var(--r-pill);font-size:13px;font-weight:500}
+.btn:hover{background:#1E514D}
+.btn[disabled]{opacity:.55;cursor:progress}
+.dot{width:7px;height:7px;border-radius:50%;background:#3FBF8F;display:inline-block;margin-right:7px;vertical-align:1px}
+.dot.err{background:#E0705F}
+
+/* product tabs */
+.prods{max-width:1520px;margin:0 auto;padding:16px 24px 0;display:flex;gap:2px}
+.prod{background:transparent;border:0;border-bottom:2px solid transparent;padding:9px 18px 11px;color:#8FA9A6;font-weight:500;display:flex;align-items:center;gap:9px}
+.prod:hover{color:#D6E5E3}
+.prod[aria-selected="true"]{color:#fff;border-bottom-color:#3FBF8F}
+.prod .tag{font-size:10.5px;font-weight:600;letter-spacing:.04em;padding:2px 7px;border-radius:var(--r-pill);background:#1D4A47;color:#8FB7B3}
+.prod[aria-selected="true"] .tag{background:#2A5F5B;color:#BFE0DC}
+
+/* ---------- controls ---------- */
+.controls{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;
+  position:sticky;top:var(--mastH,152px);z-index:30;background:var(--canvas);
+  margin:0 -24px;padding:16px 24px 15px;border-bottom:1px solid var(--hair-strong)}
+@media (max-height:620px){.mast,.controls{position:static}}
+.ctl{display:flex;align-items:center;gap:8px}
+.ctl > span{font-size:12.5px;color:var(--muted)}
+.seg{display:inline-flex;background:var(--panel-sunk);border:1px solid var(--hair);border-radius:var(--r-pill);padding:2px}
+.seg button{border:0;background:transparent;padding:5px 13px;border-radius:var(--r-pill);font-size:12.5px;color:var(--ink-2);font-weight:450}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(15,30,28,.12)}
+select.inp{background:var(--panel);border:1px solid var(--hair-strong);border-radius:7px;padding:6px 10px;font-size:13px}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{border:1px solid var(--hair-strong);background:var(--panel);border-radius:var(--r-pill);padding:4px 11px;font-size:12.5px;color:var(--ink-2);white-space:nowrap}
+.chip-sm{padding:3px 10px;font-size:12px}
+.sec-tools{margin-left:auto;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.chip[aria-pressed="true"]{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:500}
+.linky{background:none;border:0;color:var(--teal);font-size:12.5px;text-decoration:underline;padding:0}
+
+/* ---------- section headings ---------- */
+.sec{margin:30px 0 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.sec h2{margin:0;font-size:15px;font-weight:600;letter-spacing:-.005em}
+.sec .note{font-size:12.5px;color:var(--muted)}
+
+/* ---------- glance grid ---------- */
+.lanes{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.lane{background:var(--panel-sunk);border:1px solid var(--hair);border-radius:var(--r-panel);padding:14px}
+.lane-hd{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:2px 4px 12px}
+.lane-hd h3{margin:0;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.swatch{width:9px;height:9px;border-radius:2px;display:inline-block}
+.lane-hd .sub{font-size:12px;color:var(--muted)}
+.cards{display:grid;gap:10px}
+.card{background:var(--panel);border:1px solid var(--hair);border-radius:var(--r-card);padding:12px 14px 8px}
+.card-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.card-top .name{font-size:13px;font-weight:600;color:var(--ink-2)}
+.val{font-size:23px;font-weight:600;letter-spacing:-.02em}
+.delta{font-size:11.5px;font-weight:600;padding:2px 7px;border-radius:var(--r-pill);white-space:nowrap}
+.delta.up{background:#E4F1E9;color:var(--up)}
+.delta.down{background:#FBE7E5;color:var(--down)}
+.delta.flat{background:var(--panel-sunk);color:var(--flat)}
+.card .cmp{font-size:11.5px;color:var(--muted);margin-top:-2px}
+.spark{margin-top:6px}
+
+/* ---------- panels ---------- */
+.panel{background:var(--panel);border:1px solid var(--hair);border-radius:var(--r-panel);padding:18px}
+.panel-hd{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}
+.panel-hd h3{margin:0;font-size:14px;font-weight:600}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:12px}
+.legend span{font-size:12px;color:var(--ink-2);display:flex;align-items:center;gap:6px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+
+/* ---------- tables ---------- */
+table{width:100%;border-collapse:collapse}
+th,td{text-align:right;padding:8px 10px;font-size:12.5px;border-bottom:1px solid var(--hair)}
+th{font-size:11.5px;color:var(--muted);font-weight:600;background:var(--panel-sunk);position:sticky;top:0}
+th:first-child,td:first-child{text-align:left}
+tbody tr.clickable:hover{background:var(--teal-soft);cursor:pointer}
+tbody tr[aria-selected="true"]{background:var(--teal-soft);box-shadow:inset 2px 0 0 var(--teal)}
+.scroll{overflow:auto;max-height:460px;border:1px solid var(--hair);border-radius:var(--r-card)}
+.heat{border-radius:5px;padding:6px 4px;display:block;width:100%;text-align:center;font-weight:500}
+.matrix{table-layout:fixed}
+.matrix th,.matrix td{text-align:center;padding:6px 7px}
+.matrix th:first-child,.matrix td:first-child{text-align:left;width:150px;padding-left:12px}
+.hide-x{border:0;background:none;color:var(--muted);font-size:16px;line-height:1;padding:0 2px;border-radius:4px;opacity:0;transition:opacity .12s}
+.card:hover .hide-x,.hide-x:focus-visible{opacity:1}
+.hide-x:hover{color:var(--ink);background:var(--panel-sunk)}
+.state--full{min-height:calc(100vh - 300px);display:flex;flex-direction:column;align-items:center;justify-content:center}
+.legend-btn{display:flex;align-items:center;gap:7px;background:none;border:0;padding:3px 2px;font-size:12.5px;color:var(--ink-2)}
+.legend-btn[aria-pressed="false"]{opacity:.4;text-decoration:line-through}
+.rec-tabs{display:flex;gap:2px}
+.rec-tabs button{border:0;background:transparent;padding:6px 13px;border-radius:7px;font-size:13px;color:var(--muted)}
+.rec-tabs button[aria-pressed="true"]{background:var(--teal-soft);color:var(--teal);font-weight:600}
+.search{border:1px solid var(--hair-strong);border-radius:7px;padding:6px 10px;font-size:13px;width:190px;font-family:inherit}
+
+/* ---------- states ---------- */
+.state{border:1px dashed var(--hair-strong);border-radius:var(--r-panel);padding:40px 28px;text-align:center;color:var(--muted);background:var(--panel-sunk)}
+.state h3{margin:0 0 6px;color:var(--ink);font-size:15px;font-weight:600}
+.state p{margin:0 auto;max-width:52ch;font-size:13px}
+.state .btn{background:var(--teal);border-color:var(--teal);color:#fff;margin-top:16px}
+.state .btn:hover{background:#0E5D59}
+.soon{background:repeating-linear-gradient(135deg,#F4F6F5,#F4F6F5 14px,#EFF3F2 14px,#EFF3F2 28px)}
+.tip{position:fixed;pointer-events:none;background:var(--deep);color:#EAF2F1;padding:7px 10px;border-radius:7px;font-size:12px;opacity:0;transition:opacity .1s;z-index:50;white-space:nowrap}
+.tip b{color:#fff}
+.foot{margin-top:34px;padding-top:16px;border-top:1px solid var(--hair-strong);font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 18px}
+.foot a{color:var(--teal)}
+@media (max-width:1080px){.lanes{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="mast">
+  <div class="mast-in">
+    <div>
+      <h1>Delivery Metrics</h1>
+      <p>Turnaround, SLA and fulfilment for image delivery — read at VIN, rooftop and region level.</p>
+    </div>
+    <div class="sync">
+      <span class="sync-txt" id="syncTxt"><span class="dot"></span>Loading…</span>
+      <button class="btn" id="refreshBtn">Refresh data</button>
+    </div>
+  </div>
+  <nav class="prods" id="prodTabs" role="tablist" aria-label="Product line"></nav>
+</header>
+
+<main class="wrap" id="main"></main>
+<div class="tip" id="tip"></div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   CONFIG — add sheets here as they land in the workbook.
+   Set status:'live' on a product once its sheets exist.
+   ============================================================ */
+const SHEET_ID = "16vFElbOV8Awd63R6-WlsNdAScWNE18xGUPFkzE0GN7c";
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit";
+
+function mkMetrics(lastId,lastLabel){
+  return [
+    { id:"sla_pct",     label:"SLA met",   kind:"pct", better:"high" },
+    { id:"p99_tat_hrs", label:"TAT (P99)", kind:"hrs", better:"low"  },
+    { id:"p95_tat_hrs", label:"TAT (P95)", kind:"hrs", better:"low"  },
+    { id:lastId,        label:lastLabel,   kind:"pct", better:"high" }
+  ];
+}
+
+const PRODUCTS = [
+  { id:"images", label:"Images", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment"),
+    lanes:[
+      { id:"vin",    label:"VIN",     sheet:"images_vin",    color:"var(--s1)", blurb:"Every vehicle delivered" },
+      { id:"rt",     label:"Rooftop", sheet:"images_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
+      { id:"region", label:"Region",  sheet:"images_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
+    ]},
+  { id:"spin", label:"360", status:"live", metrics:mkMetrics("delivery_pct","Delivery"),
+    lanes:[
+      { id:"spin",   label:"Spin",    sheet:"360_spin",   color:"var(--s1)", blurb:"Every spin delivered" },
+      { id:"rt",     label:"Rooftop", sheet:"360_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
+      { id:"region", label:"Region",  sheet:"360_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
+    ]},
+  { id:"video", label:"Video", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment"),
+    lanes:[
+      { id:"vin",    label:"VIN",     sheet:"video_vin",    color:"var(--s1)", blurb:"Every vehicle delivered" },
+      { id:"rt",     label:"Rooftop", sheet:"video_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
+      { id:"region", label:"Region",  sheet:"video_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
+    ]}
+];
+
+const SEGMENTS = [
+  { id:"all",       label:"All segments", prefix:"" },
+  { id:"ent",       label:"Enterprise",   prefix:"ent_" },
+  { id:"mid",       label:"Mid-market",   prefix:"mid_" },
+  { id:"resellers", label:"Resellers",    prefix:"resellers_" },
+  { id:"smb",       label:"SMB",          prefix:"smb_" }
+];
+
+const METRICS = PRODUCTS[0].metrics;
+/* Each product names its own metrics — images reports fulfilment, 360 reports delivery. */
+function metricsOf(){ return (PRODUCTS.find(p=>p.id===state.product)||{}).metrics || METRICS; }
+function metricById(id){ const l=metricsOf(); return l.find(m=>m.id===id) || l[0]; }
+
+const SERIES_COLORS = ["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--s5)"];
+
+/* ============================================================ */
+const state = {
+  product:"images", granularity:"month", segment:"all",
+  regions:{}, regionsInit:{},
+  trendMetric:"sla_pct", trendSplit:"lane", colorMode:"auto", hiddenCards:new Set(),
+  matrixMetric:"sla_pct", matrixLane:"vin",
+  drillRegion:null, recordsLane:"vin", recordsQuery:"", hidden:new Set(),
+  sortCol:null, sortDir:-1,
+  data:{}, loading:false, error:null, synced:null
+};
+/* Sheets are cached per product, so 360's rooftop rows never overwrite images'. */
+function key(laneId){ return state.product+":"+laneId; }
+function raw(laneId){ return state.data[key(laneId)] || []; }
+function regSet(){
+  if(!state.regions[state.product]) state.regions[state.product]=new Set();
+  return state.regions[state.product];
+}
+
+/* ---------- data ---------- */
+function gvizBase(sheet){
+  return "https://docs.google.com/spreadsheets/d/"+SHEET_ID+
+         "/gviz/tq?headers=1&sheet="+encodeURIComponent(sheet)+"&_="+Date.now();
+}
+/* Opened straight off disk, the page has a null origin and Google refuses the
+   cross-origin fetch. A <script> tag has no such limit, so fall back to JSONP. */
+let jsonpN=0;
+function loadViaJsonp(sheet){
+  return new Promise(function(resolve,reject){
+    const cb="__gviz_cb_"+(++jsonpN);
+    const s=document.createElement("script");
+    let settled=false;
+    function cleanup(){ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(s.parentNode) s.parentNode.removeChild(s); }
+    window[cb]=function(resp){
+      settled=true; cleanup();
+      if(!resp||resp.status==="error"){
+        reject(new Error((resp&&resp.errors&&resp.errors[0]&&resp.errors[0].detailed_message)||("Sheet \u201c"+sheet+"\u201d could not be read")));
+      } else resolve(resp.table);
+    };
+    s.onerror=function(){ if(!settled){ cleanup(); reject(new Error("Couldn\u2019t reach Google Sheets \u2014 check the connection")); } };
+    s.src=gvizBase(sheet)+"&tqx=out:json;responseHandler:"+cb;
+    document.head.appendChild(s);
+    setTimeout(function(){ if(!settled){ cleanup(); reject(new Error("Sheet \u201c"+sheet+"\u201d timed out")); } },25000);
+  });
+}
+async function fetchTable(sheet){
+  try{
+    const res=await fetch(gvizBase(sheet)+"&tqx=out:json");
+    if(!res.ok) throw new Error("HTTP "+res.status);
+    return parseGviz(await res.text());
+  }catch(e){
+    return loadViaJsonp(sheet);
+  }
+}
+function parseGviz(text){
+  const s=text.indexOf("{"), e=text.lastIndexOf("}");
+  if(s<0) throw new Error("Unexpected response from Google Sheets");
+  const j=JSON.parse(text.slice(s,e+1));
+  if(j.status==="error") throw new Error((j.errors&&j.errors[0]&&j.errors[0].detailed_message)||"Sheet query failed");
+  return j.table;
+}
+function normGran(v){
+  const g=String(v==null?"":v).trim().toLowerCase();
+  if(g.indexOf("week")===0) return "week";
+  if(g.indexOf("month")===0) return "month";
+  return g;
+}
+/* Order periods off their labels (M-4 \u2192 MTD) so sheets without a date column
+   still read oldest-to-newest instead of however the rows happen to sit. */
+function periodRank(p){
+  const t=String(p==null?"":p).trim();
+  const m=/^([MWQY])-(\d+)$/i.exec(t);
+  if(m) return -parseInt(m[2],10);
+  if(/^(MTD|WTD|QTD|YTD)$/i.test(t)) return 0;
+  return null;
+}
+function comparePeriods(a,b){
+  const ra=periodRank(a.period), rb=periodRank(b.period);
+  if(ra!==null && rb!==null && ra!==rb) return ra-rb;
+  if(a.date && b.date) return a.date-b.date;
+  return 0;
+}
+function toDate(v){
+  if(v==null) return null;
+  if(v instanceof Date) return v;
+  const m=/^Date\((\d+),(\d+),(\d+)/.exec(String(v));
+  return m ? new Date(+m[1],+m[2],+m[3]) : new Date(v);
+}
+async function loadSheet(sheet){
+  const table=await fetchTable(sheet);
+  const labels=table.cols.map((c,i)=>(c.label||c.id||("col"+i)).trim());
+  return table.rows.map(r=>{
+    const o={ v:{} };
+    labels.forEach((lab,i)=>{
+      const cell=r.c&&r.c[i], val=cell?cell.v:null;
+      if(lab==="sort_date") o.date=toDate(val);
+      /* Sheets don't all use the same headers: images/360 say granularity + sort_group,
+         video says period_type + sort_order, and two video sheets carry no date at all. */
+      else if(lab==="granularity"||lab==="period_type") o.granularity=normGran(val);
+      else if(lab==="period") o.period=val==null?"":String(val);
+      else if(lab==="region") o.region=val==null?"Unknown":String(val);
+      else if(lab==="sort_group"||lab==="sort_order") o.group=val;
+      else o.v[lab]= (val===""||val==null) ? null : Number(val);
+    });
+    return o;
+  }).filter(r=>r.period);
+}
+async function loadAll(){
+  const prod=PRODUCTS.find(p=>p.id===state.product);
+  if(!prod||prod.status!=="live"||!prod.lanes.length) return;
+  state.loading=true; state.error=null; render();
+  try{
+    const results=await Promise.all(prod.lanes.map(l=>loadSheet(l.sheet)));
+    prod.lanes.forEach((l,i)=>{ state.data[key(l.id)]=results[i]; });
+    if(!state.regionsInit[state.product]){
+      allRegions().forEach(r=>regSet().add(r));
+      state.regionsInit[state.product]=true;
+    }
+    state.synced=new Date();
+  }catch(err){ state.error=err.message||String(err); }
+  state.loading=false; render();
+}
+
+/* ---------- selectors ---------- */
+function lanesOf(){ return (PRODUCTS.find(p=>p.id===state.product)||{lanes:[]}).lanes; }
+function laneById(id){ return lanesOf().find(l=>l.id===id); }
+function rowsFor(laneId){
+  const rows=raw(laneId);
+  return rows.filter(r=>r.granularity===state.granularity).sort(comparePeriods);
+}
+function allRegions(){
+  const s=new Set();
+  raw("region").forEach(r=>{ if(r.region) s.add(r.region); });
+  return [...s].sort();
+}
+function activeRegions(){
+  const all=allRegions();
+  const sel=all.filter(r=>regSet().has(r));
+  return sel.length?sel:all;
+}
+function col(metricId){ return (SEGMENTS.find(s=>s.id===state.segment)||SEGMENTS[0]).prefix+metricId; }
+function periodsOf(){
+  const ls=lanesOf(), a=ls[0]?rowsFor(ls[0].id):[], b=ls[1]?rowsFor(ls[1].id):[];
+  const src=a.length?a:b;
+  const out=[],seen=new Set();
+  src.forEach(r=>{ if(!seen.has(r.period)){ seen.add(r.period); out.push(r.period); }});
+  if(out.length) return out;
+  const set=new Set(); rowsFor("region").forEach(r=>set.add(r.period));
+  return [...set];
+}
+/* region lane: mean across the regions in play, per period */
+function regionSeries(colName, regionFilter){
+  const rows=rowsFor("region"), keep=regionFilter||activeRegions();
+  const byPeriod=new Map();
+  rows.forEach(r=>{
+    if(!keep.includes(r.region)) return;
+    const val=r.v[colName];
+    if(val==null||isNaN(val)) return;
+    if(!byPeriod.has(r.period)) byPeriod.set(r.period,[]);
+    byPeriod.get(r.period).push(val);
+  });
+  return periodsOf().map(p=>{
+    const a=byPeriod.get(p);
+    return a&&a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+  });
+}
+function laneSeries(laneId, colName){
+  if(laneId==="region") return regionSeries(colName);
+  const map=new Map(rowsFor(laneId).map(r=>[r.period, r.v[colName]]));
+  return periodsOf().map(p=>{ const v=map.get(p); return (v==null||isNaN(v))?null:v; });
+}
+function lastTwo(series){
+  const idx=[]; series.forEach((v,i)=>{ if(v!=null) idx.push(i); });
+  const n=idx.length;
+  return { cur:n?series[idx[n-1]]:null, prev:n>1?series[idx[n-2]]:null,
+           curIdx:n?idx[n-1]:null, prevIdx:n>1?idx[n-2]:null };
+}
+
+/* ---------- formatting ---------- */
+function fmt(metric,v){
+  if(v==null||isNaN(v)) return "\u2014";
+  if(metric.kind==="pct") return v.toFixed(1)+"%";
+  return v>=100 ? Math.round(v).toLocaleString("en-IN")+"h" : v.toFixed(1)+"h";
+}
+function fmtDelta(metric,cur,prev){
+  if(cur==null||prev==null) return null;
+  const d=cur-prev;
+  const txt = metric.kind==="pct"
+    ? (d>=0?"+":"\u2212")+Math.abs(d).toFixed(1)+" pp"
+    : (d>=0?"+":"\u2212")+(Math.abs(d)>=100?Math.round(Math.abs(d)):Math.abs(d).toFixed(1))+"h";
+  const good = metric.better==="high" ? d>0 : d<0;
+  const tone = Math.abs(d)<0.05 ? "flat" : (good?"up":"down");
+  return { txt, tone };
+}
+function periodName(p){
+  const map={ "MTD":"Month to date","M-1":"Last month","M-2":"2 months back","M-3":"3 months back","M-4":"4 months back",
+              "W-1":"This week","W-2":"Last week","W-3":"2 weeks back","W-4":"3 weeks back" };
+  return map[p]||p;
+}
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+
+/* ---------- svg charts ---------- */
+/* Every line is coloured step by step: each leg is judged only against the
+   point before it, green when the move is good for that metric, red when not. */
+function stepTone(metric,prev,cur){
+  if(prev==null||cur==null||isNaN(prev)||isNaN(cur)) return "flat";
+  const d=cur-prev;
+  if(Math.abs(d)<0.0005) return "flat";
+  return (metric.better==="high" ? d>0 : d<0) ? "up" : "down";
+}
+function toneColor(t){ return t==="up"?"var(--up)":t==="down"?"var(--down)":"var(--flat)"; }
+
+function sparkline(series,metric,labels){
+  const idx=[]; series.forEach((v,i)=>{ if(v!=null) idx.push(i); });
+  if(idx.length<2) return '<div class="spark" style="height:120px"></div>';
+  const W=240,H=124,padT=20,padB=20,padX=22;
+  const vals=idx.map(i=>series[i]);
+  const min=Math.min(...vals),max=Math.max(...vals),span=(max-min)||1;
+  const n=series.length, base=H-padB;
+  const x=i=> n>1 ? padX+i*(W-padX*2)/(n-1) : W/2;
+  const y=v=> padT+(base-padT)*(1-(v-min)/span);
+  const pts=idx.map(i=>[x(i),y(series[i]),i]);
+  const tones=pts.map((p,k)=> k===0 ? null : stepTone(metric,series[pts[k-1][2]],series[p[2]]));
+  let svg='<svg class="spark" viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" role="img" aria-label="'+
+    esc(metric.label)+' trend">';
+  svg+='<line x1="0" y1="'+base+'" x2="'+W+'" y2="'+base+'" stroke="var(--hair-strong)" stroke-width="1"/>';
+  for(let k=1;k<pts.length;k++){
+    const a=pts[k-1],b=pts[k],c=toneColor(tones[k]);
+    svg+='<path d="M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+' L'+b[0].toFixed(1)+' '+b[1].toFixed(1)+
+         ' L'+b[0].toFixed(1)+' '+base+' L'+a[0].toFixed(1)+' '+base+' Z" fill="'+c+'" opacity=".09"/>';
+    svg+='<path d="M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+' L'+b[0].toFixed(1)+' '+b[1].toFixed(1)+
+         '" fill="none" stroke="'+c+'" stroke-width="2" stroke-linecap="round"/>';
+  }
+  pts.forEach((p,k)=>{
+    const isLast=k===pts.length-1;
+    const c=toneColor(k===0?tones[1]:tones[k]);
+    svg+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(isLast?3.6:2.3)+
+         '" fill="'+(isLast?c:"var(--panel)")+'" stroke="'+c+'" stroke-width="1.8"/>';
+    svg+='<text x="'+p[0].toFixed(1)+'" y="'+Math.max(11,p[1]-9).toFixed(1)+
+         '" text-anchor="middle" font-size="11" font-weight="'+(isLast?"700":"600")+
+         '" fill="'+(k===0?"var(--ink-2)":c)+'">'+fmt(metric,series[p[2]])+'</text>';
+  });
+  (labels||[]).forEach((lab,i)=>{
+    svg+='<text x="'+x(i).toFixed(1)+'" y="'+(H-5)+'" text-anchor="middle" font-size="10.5" fill="var(--muted)">'+esc(lab)+'</text>';
+  });
+  return svg+'</svg>';
+}
+
+function lineChart(seriesList, labels, metric, colorMode){
+  const all=[]; seriesList.forEach(s=>s.values.forEach(v=>{ if(v!=null) all.push(v); }));
+  if(!all.length) return '<div class="state"><h3>No numbers here yet</h3><p>Nothing in this sheet matches the current filters. Widen the region or segment filter.</p></div>';
+  const W=1000,H=430,L=62,R=26,T=34,B=42;
+  let min=Math.min(...all),max=Math.max(...all);
+  if(metric.kind==="pct"){ min=Math.max(0,min-(max-min)*0.25-0.5); max=Math.min(100.5,max+(max-min)*0.15+0.5); }
+  else { min=Math.max(0,min-(max-min)*0.2); max=max+(max-min)*0.15+0.5; }
+  if(max-min<0.001){ max=min+1; }
+  const n=labels.length;
+  const x=i=>L+(n>1?(i*(W-L-R)/(n-1)):(W-L-R)/2);
+  const y=v=>T+(H-T-B)*(1-(v-min)/(max-min));
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="430" role="img" aria-label="Trend chart">';
+  const ticks=5;
+  for(let i=0;i<=ticks;i++){
+    const v=min+(max-min)*i/ticks, yy=y(v);
+    svg+='<line x1="'+L+'" y1="'+yy.toFixed(1)+'" x2="'+(W-R)+'" y2="'+yy.toFixed(1)+'" stroke="var(--hair)" stroke-width="1"'+(i?' stroke-dasharray="3 4"':'')+'/>';
+    svg+='<text x="'+(L-10)+'" y="'+(yy+4).toFixed(1)+'" text-anchor="end" font-size="11" fill="var(--muted)">'+
+         (metric.kind==="pct"?v.toFixed(1):(v>=100?Math.round(v):v.toFixed(1)))+'</text>';
+  }
+  labels.forEach((lab,i)=>{
+    svg+='<text x="'+x(i).toFixed(1)+'" y="'+(H-16)+'" text-anchor="middle" font-size="12" font-weight="500" fill="var(--ink-2)">'+esc(lab)+'</text>';
+  });
+  svg+='<text x="'+(L-10)+'" y="16" text-anchor="end" font-size="10.5" fill="var(--muted)">'+
+       (metric.kind==="pct"?"%":"hours")+'</text>';
+  const placed=[];
+  const byMove = colorMode==="movement";
+  seriesList.forEach((s,si)=>{
+    const color=s.color||SERIES_COLORS[si%SERIES_COLORS.length];
+    const pts=[];
+    s.values.forEach((v,i)=>{ if(v!=null) pts.push([x(i),y(v),i,v]); });
+    const tones=pts.map((p,k)=> k===0 ? null : stepTone(metric,pts[k-1][3],p[3]));
+    if(byMove){
+      for(let k=1;k<pts.length;k++){
+        const a=pts[k-1],b=pts[k];
+        svg+='<path d="M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+' L'+b[0].toFixed(1)+' '+b[1].toFixed(1)+
+             '" fill="none" stroke="'+toneColor(tones[k])+'" stroke-width="2.6" stroke-linecap="round"/>';
+      }
+    } else if(pts.length>1){
+      svg+='<path d="'+pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ")+
+           '" fill="none" stroke="'+color+'" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>';
+    }
+    pts.forEach((p,pi)=>{
+      const tc = byMove ? toneColor(pi===0?tones[1]:tones[pi]) : color;
+      svg+='<circle class="pt" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="4.5" fill="'+
+           (byMove?tc:"var(--panel)")+'" stroke="'+(byMove?"var(--panel)":color)+'" stroke-width="'+(byMove?1.4:2.2)+'" '+
+           'data-label="'+esc(s.name)+'" data-x="'+esc(labels[p[2]]||"")+'" data-v="'+esc(fmt(metric,p[3]))+'"></circle>';
+      const up = si%2===0;
+      const ly = up ? Math.max(16,p[1]-13) : Math.min(H-B-6,p[1]+20);
+      const clash = placed.some(q=>Math.abs(q[0]-p[0])<44 && Math.abs(q[1]-ly)<13);
+      if(!clash){
+        placed.push([p[0],ly]);
+        svg+='<text x="'+p[0].toFixed(1)+'" y="'+ly.toFixed(1)+
+             '" text-anchor="middle" font-size="11.5" font-weight="600" fill="'+tc+'">'+esc(fmt(metric,p[3]))+'</text>';
+      }
+    });
+  });
+  svg+='</svg>';
+  return svg;
+}
+
+function heatStyle(metric,v,min,max){
+  if(v==null||isNaN(v)||max===min) return "background:var(--panel-sunk);color:var(--muted)";
+  let t=(v-min)/(max-min);
+  if(metric.better==="low") t=1-t;
+  const good=[27,122,70], bad=[179,38,30];
+  const mix=t*t*(3-2*t);
+  const r=Math.round(bad[0]+(good[0]-bad[0])*mix),
+        g=Math.round(bad[1]+(good[1]-bad[1])*mix),
+        b=Math.round(bad[2]+(good[2]-bad[2])*mix);
+  const alpha=0.10+0.20*Math.abs(mix-0.5)*2;
+  return "background:rgba("+r+","+g+","+b+","+alpha.toFixed(2)+");color:rgb("+
+         Math.round(r*0.65)+","+Math.round(g*0.65)+","+Math.round(b*0.65)+")";
+}
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function syncSticky(){
+  const m=document.querySelector(".mast");
+  if(m) document.documentElement.style.setProperty("--mastH", m.offsetHeight+"px");
+}
+function render(){
+  renderTabs();
+  renderSync();
+  const prod=PRODUCTS.find(p=>p.id===state.product);
+  const main=document.getElementById("main");
+
+  if(prod.status!=="live"){
+    main.innerHTML=
+      '<div class="state soon state--full" style="margin-top:32px">'+
+        '<h3>'+esc(prod.label)+' isn\u2019t wired up yet</h3>'+
+        '<p>The workbook doesn\u2019t feed this tab yet. Once the '+esc(prod.label)+
+        ' sheets are ready, add them to the <code>PRODUCTS</code> list at the top of this file and flip the status to live \u2014 '+
+        'every filter, chart and table below carries over unchanged.</p>'+
+      '</div>';
+    return;
+  }
+  const ms=metricsOf();
+  if(!ms.some(m=>m.id===state.trendMetric))  state.trendMetric=ms[0].id;
+  if(!ms.some(m=>m.id===state.matrixMetric)) state.matrixMetric=ms[0].id;
+  if(!laneById(state.matrixLane))  state.matrixLane=lanesOf()[0].id;
+  if(!laneById(state.recordsLane)){ state.recordsLane=lanesOf()[0].id; state.sortCol=null; }
+  if(state.loading && !raw(lanesOf()[0].id).length){
+    main.innerHTML='<div class="state" style="margin-top:32px"><h3>Pulling the workbook</h3><p>Reading images_vin, images_rt and images_region.</p></div>';
+    return;
+  }
+  if(state.error){
+    main.innerHTML='<div class="state" style="margin-top:32px"><h3>Couldn\u2019t read the sheet</h3><p>'+esc(state.error)+
+      '</p><p style="margin-top:10px">The workbook has to be shared as \u201cAnyone with the link \u2014 Viewer\u201d for this page to read it.</p>'+
+      '<button class="btn" id="retryBtn">Try again</button></div>';
+    document.getElementById("retryBtn").onclick=loadAll;
+    return;
+  }
+
+  main.innerHTML =
+    controlsHTML() +
+    glanceHTML() +
+    trendHTML() +
+    matrixHTML() +
+    recordsHTML() +
+    footHTML();
+  wire();
+  syncSticky();
+}
+
+function renderTabs(){
+  document.getElementById("prodTabs").innerHTML=PRODUCTS.map(p=>
+    '<button class="prod" role="tab" data-prod="'+p.id+'" aria-selected="'+(p.id===state.product)+'">'+
+      esc(p.label)+'<span class="tag">'+(p.status==="live"?"Live":"Soon")+'</span></button>').join("");
+  document.querySelectorAll("[data-prod]").forEach(b=>b.onclick=()=>{
+    state.product=b.dataset.prod;
+    const p=PRODUCTS.find(x=>x.id===state.product);
+    const first=p&&p.lanes[0];
+    if(p&&p.status==="live"&&first&&!state.data[state.product+":"+first.id]) loadAll(); else render();
+  });
+}
+function renderSync(){
+  const el=document.getElementById("syncTxt");
+  const btn=document.getElementById("refreshBtn");
+  btn.disabled=state.loading;
+  btn.textContent=state.loading?"Refreshing\u2026":"Refresh data";
+  if(state.error) el.innerHTML='<span class="dot err"></span>Sheet unreachable';
+  else if(state.loading) el.innerHTML='<span class="dot"></span>Reading the workbook\u2026';
+  else if(state.synced) el.innerHTML='<span class="dot"></span>Synced '+state.synced.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})+
+       ' \u00b7 '+state.synced.toLocaleDateString("en-IN",{day:"numeric",month:"short"});
+  else el.innerHTML='<span class="dot"></span>Ready';
+}
+
+function controlsHTML(){
+  const regs=allRegions();
+  return '<div class="controls">'+
+    '<div class="ctl"><span>Period</span><div class="seg">'+
+      '<button data-gran="week"  aria-pressed="'+(state.granularity==="week")+'">Weekly</button>'+
+      '<button data-gran="month" aria-pressed="'+(state.granularity==="month")+'">Monthly</button>'+
+    '</div></div>'+
+    '<div class="ctl"><span>Segment</span><div class="chips">'+
+      SEGMENTS.map(s=>'<button class="chip" data-seg="'+s.id+'" aria-pressed="'+(s.id===state.segment)+'">'+esc(s.label)+'</button>').join("")+
+    '</div></div>'+
+    (regs.length?'<div class="ctl"><span>Regions</span><div class="chips">'+
+      regs.map(r=>'<button class="chip" data-region="'+esc(r)+'" aria-pressed="'+regSet().has(r)+'">'+esc(r)+'</button>').join("")+
+      '</div><button class="linky" id="regAll">'+(regSet().size===regs.length?"Clear all":"Select all")+'</button></div>':'')+
+  '</div>';
+}
+
+function glanceHTML(){
+  const segLabel=(SEGMENTS.find(s=>s.id===state.segment)||SEGMENTS[0]).label.toLowerCase();
+  const periods=periodsOf();
+  const latest=periods.length?periods[periods.length-1]:"";
+  let html='<div class="sec"><h2>At a glance</h2><span class="note">'+
+    esc(periodName(latest))+' \u00b7 '+esc(segLabel)+' \u00b7 change is against the period before it</span>'+
+    '<div class="sec-tools"><span class="note">Cards</span>'+
+      metricsOf().map(x=>'<button class="chip chip-sm" data-card="'+x.id+'" aria-pressed="'+
+        (!state.hiddenCards.has(x.id))+'">'+esc(x.label)+'</button>').join("")+
+    '</div></div><div class="lanes">';
+
+  lanesOf().forEach(lane=>{
+    html+='<section class="lane"><div class="lane-hd"><h3><span class="swatch" style="background:'+lane.color+'"></span>'+
+      esc(lane.label)+'</h3><span class="sub">'+esc(lane.blurb)+
+      (lane.id==="region"?' \u00b7 '+activeRegions().length+' selected':'')+'</span></div><div class="cards">';
+    metricsOf().filter(m=>!state.hiddenCards.has(m.id)).forEach(m=>{
+      const series=laneSeries(lane.id,col(m.id));
+      const t=lastTwo(series), d=fmtDelta(m,t.cur,t.prev);
+      html+='<article class="card"><div class="card-top"><span class="name">'+esc(m.label)+
+        (lane.id==="region"?' <span style="font-weight:400;color:var(--muted)">avg</span>':'')+'</span>'+
+        '<span style="display:flex;align-items:center;gap:8px">'+
+        (d?'<span class="delta '+d.tone+'">'+d.txt+'</span>':'')+
+        '<button class="hide-x" data-card="'+m.id+'" title="Hide this card" aria-label="Hide '+esc(m.label)+'">\u00d7</button>'+
+        '</span></div>'+
+        '<div class="val num">'+fmt(m,t.cur)+'</div>'+
+        '<div class="cmp num">'+(t.prev!=null?"was "+fmt(m,t.prev):"no prior period")+'</div>'+
+        sparkline(series,m,periodsOf())+'</article>';
+    });
+    html+='</div></section>';
+  });
+  return html+'</div>';
+}
+
+function trendSeries(){
+  const m=metricById(state.trendMetric);
+  const c=col(m.id);
+  if(state.trendSplit==="lane")
+    return lanesOf().map(l=>({ name:l.label+(l.id==="region"?" (avg)":""), values:laneSeries(l.id,c) }));
+  if(state.trendSplit==="segment")
+    return SEGMENTS.map(s=>({ name:s.label, values:laneSeries(state.matrixLane,s.prefix+m.id) }));
+  return activeRegions().map(r=>({ name:r, values:regionSeries(c,[r]) }));
+}
+function trendHTML(){
+  const m=metricById(state.trendMetric);
+  const labels=periodsOf();
+  const all=trendSeries().map((sr,i)=>Object.assign({},sr,{color:SERIES_COLORS[i%SERIES_COLORS.length]}));
+  const shown=all.filter(sr=>!state.hidden.has(sr.name));
+  const colorMode = state.colorMode==="auto" ? (shown.length===1?"movement":"series") : state.colorMode;
+  const splitNote = state.trendSplit==="segment"
+    ? "Segment split reads from the "+esc((laneById(state.matrixLane)||{}).label||"")+" sheet."
+    : (state.trendSplit==="region" ? "One line per selected region." : "VIN and rooftop as reported; region is the mean of the selected regions.");
+
+  const summary=all.map(sr=>{
+    const vals=sr.values.map((v,i)=>[v,i]).filter(p=>p[0]!=null);
+    const t=lastTwo(sr.values), d=fmtDelta(m,t.cur,t.prev);
+    let best=null,worst=null;
+    vals.forEach(p=>{
+      if(best===null || (m.better==="high" ? p[0]>best[0] : p[0]<best[0])) best=p;
+      if(worst===null || (m.better==="high" ? p[0]<worst[0] : p[0]>worst[0])) worst=p;
+    });
+    return '<tr'+(state.hidden.has(sr.name)?' style="opacity:.4"':'')+'>'+
+      '<td><span class="swatch" style="background:'+sr.color+';margin-right:8px"></span>'+esc(sr.name)+'</td>'+
+      '<td class="num" style="font-weight:600">'+fmt(m,t.cur)+'</td>'+
+      '<td class="num">'+fmt(m,t.prev)+'</td>'+
+      '<td>'+(d?'<span class="delta '+d.tone+'">'+d.txt+'</span>':"\u2014")+'</td>'+
+      '<td class="num">'+(best?fmt(m,best[0])+'  <span style="color:var(--muted)">'+esc(labels[best[1]]||"")+'</span>':"\u2014")+'</td>'+
+      '<td class="num">'+(worst?fmt(m,worst[0])+'  <span style="color:var(--muted)">'+esc(labels[worst[1]]||"")+'</span>':"\u2014")+'</td>'+
+      '</tr>';
+  }).join("");
+
+  return '<div class="sec"><h2>Trend</h2><span class="note">'+splitNote+' Click a name to hide its line.'+(colorMode==="movement"?' Each leg is green or red against the point before it.':'')+'</span></div>'+
+    '<div class="panel"><div class="panel-hd">'+
+      '<div class="ctl"><span>Metric</span><div class="seg">'+
+        metricsOf().map(x=>'<button data-tm="'+x.id+'" aria-pressed="'+(x.id===state.trendMetric)+'">'+esc(x.label)+'</button>').join("")+
+      '</div></div>'+
+      '<div class="ctl"><span>Split by</span><div class="seg">'+
+        [["lane","Cut"],["segment","Segment"],["region","Region"]].map(o=>
+          '<button data-split="'+o[0]+'" aria-pressed="'+(o[0]===state.trendSplit)+'">'+o[1]+'</button>').join("")+
+      '</div></div>'+
+      '<div class="ctl"><span>Colour</span><div class="seg">'+
+        [["movement","Movement"],["series","Series"]].map(o=>
+          '<button data-cmode="'+o[0]+'" aria-pressed="'+(o[0]===colorMode)+'">'+o[1]+'</button>').join("")+
+      '</div></div>'+
+    '</div>'+
+    (shown.length ? lineChart(shown,labels,m,colorMode)
+      : '<div class="state"><h3>Every line is hidden</h3><p>Click a name below to bring it back.</p></div>')+
+    '<div class="legend">'+all.map(sr=>'<button class="legend-btn" data-series="'+esc(sr.name)+
+      '" aria-pressed="'+(!state.hidden.has(sr.name))+'"><span class="swatch" style="background:'+sr.color+
+      '"></span>'+esc(sr.name)+'</button>').join("")+'</div>'+
+    '<div class="scroll" style="margin-top:16px;max-height:none"><table class="records"><tr>'+
+      '<th>Series</th><th>Latest</th><th>Previous</th><th>Change</th><th>Best period</th><th>Worst period</th></tr>'+
+      '<tbody>'+summary+'</tbody></table></div>'+
+    '</div>';
+}
+
+function matrixHTML(){
+  const m=metricById(state.matrixMetric);
+  const periods=periodsOf();
+  const regs=activeRegions();
+
+  /* region × period */
+  const rVals=[];
+  const rRows=regs.map(r=>{
+    const vals=regionSeries(col(m.id),[r]);
+    vals.forEach(v=>{ if(v!=null) rVals.push(v); });
+    return { name:r, vals:vals };
+  });
+  const rMin=rVals.length?Math.min(...rVals):0, rMax=rVals.length?Math.max(...rVals):1;
+
+  /* segment × period for the chosen cut */
+  const sVals=[];
+  const sRows=SEGMENTS.map(s=>{
+    const vals=laneSeries(state.matrixLane,s.prefix+m.id);
+    vals.forEach(v=>{ if(v!=null) sVals.push(v); });
+    return { name:s.label, vals:vals };
+  });
+  const sMin=sVals.length?Math.min(...sVals):0, sMax=sVals.length?Math.max(...sVals):1;
+
+  const head=first=>'<tr><th>'+esc(first)+'</th>'+periods.map(p=>'<th>'+esc(p)+'</th>').join("")+'</tr>';
+  const body=(rows,min,max,clickAttr)=>rows.map(row=>
+    '<tr'+(clickAttr?' class="clickable" data-drill="'+esc(row.name)+'" aria-selected="'+(state.drillRegion===row.name)+'"':'')+'>'+
+    '<td style="font-weight:500">'+esc(row.name)+'</td>'+
+    row.vals.map(v=>'<td><span class="heat num" style="'+heatStyle(m,v,min,max)+'">'+fmt(m,v)+'</span></td>').join("")+
+    '</tr>').join("");
+
+  return '<div class="sec"><h2>Drill down</h2><span class="note">Oldest period on the left. Colour runs red (worst) to green (best) within each grid.</span></div>'+
+  '<div class="panel" style="margin-bottom:18px"><div class="panel-hd"><h3>Pick a metric to break apart</h3>'+
+    '<div class="seg">'+metricsOf().map(x=>'<button data-mm="'+x.id+'" aria-pressed="'+(x.id===state.matrixMetric)+'">'+esc(x.label)+'</button>').join("")+'</div>'+
+  '</div>'+
+  '<div class="grid2">'+
+    '<div><div class="panel-hd"><h3>By region</h3><span class="note">Click a row for its segment detail</span></div>'+
+      '<div class="scroll"><table class="matrix">'+head("Region")+'<tbody>'+(rRows.length?body(rRows,rMin,rMax,true):'<tr><td colspan="'+(periods.length+1)+'" style="text-align:center;color:var(--muted);padding:24px">No regions selected</td></tr>')+'</tbody></table></div></div>'+
+    '<div><div class="panel-hd"><h3>By segment</h3>'+
+      '<div class="rec-tabs">'+lanesOf().map(l=>'<button data-ml="'+l.id+'" aria-pressed="'+(l.id===state.matrixLane)+'">'+esc(l.label)+'</button>').join("")+'</div></div>'+
+      '<div class="scroll"><table class="matrix">'+head("Segment")+'<tbody>'+body(sRows,sMin,sMax,false)+'</tbody></table></div></div>'+
+  '</div>'+
+  drillHTML()+
+  '</div>';
+}
+
+function drillHTML(){
+  if(!state.drillRegion) return "";
+  const periods=periodsOf();
+  const rows=rowsFor("region").filter(r=>r.region===state.drillRegion);
+  const byPeriod=new Map(rows.map(r=>[r.period,r]));
+  let html='<div style="margin-top:18px;border-top:1px solid var(--hair-strong);padding-top:16px">'+
+    '<div class="panel-hd"><h3>'+esc(state.drillRegion)+' \u2014 every metric, every segment</h3>'+
+    '<button class="linky" id="drillClose">Close</button></div>'+
+    '<div class="scroll"><table class="records"><tr><th>Segment</th><th>Metric</th>'+periods.map(p=>'<th>'+esc(p)+'</th>').join("")+'</tr><tbody>';
+  SEGMENTS.forEach(s=>{
+    metricsOf().forEach((m,mi)=>{
+      html+='<tr>'+(mi===0?'<td rowspan="'+metricsOf().length+'" style="font-weight:600;vertical-align:top">'+esc(s.label)+'</td>':'')+
+        '<td style="color:var(--ink-2)">'+esc(m.label)+'</td>'+
+        periods.map(p=>{
+          const r=byPeriod.get(p), v=r?r.v[s.prefix+m.id]:null;
+          return '<td class="num">'+fmt(m,v)+'</td>';
+        }).join("")+'</tr>';
+    });
+  });
+  return html+'</tbody></table></div></div>';
+}
+
+function recordFields(laneId){
+  const rows=raw(laneId);
+  const keys=new Set();
+  rows.forEach(r=>Object.keys(r.v).forEach(k=>keys.add(k)));
+  return [...keys];
+}
+function recordRows(){
+  const laneId=state.recordsLane;
+  const dim=(laneById(laneId)||{}).dim;
+  let rows=raw(laneId).filter(r=>r.granularity===state.granularity);
+  if(dim==="region") rows=rows.filter(r=>activeRegions().includes(r.region));
+  const q=state.recordsQuery.trim().toLowerCase();
+  if(q) rows=rows.filter(r=>(r.period+" "+(r.region||"")).toLowerCase().includes(q));
+  rows.sort((a,b)=>{
+    if(state.sortCol){
+      const av=a.v[state.sortCol], bv=b.v[state.sortCol];
+      if(av==null) return 1; if(bv==null) return -1;
+      return (av-bv)*state.sortDir;
+    }
+    return -comparePeriods(a,b);
+  });
+  return rows;
+}
+function recordsHTML(){
+  const laneId=state.recordsLane;
+  const dim=(laneById(laneId)||{}).dim;
+  const fields=recordFields(laneId);
+  const rows=recordRows();
+  const head='<tr><th>Period</th><th>Date</th>'+(dim?'<th>Region</th>':'')+
+    fields.map(f=>'<th class="clickable" data-sort="'+esc(f)+'" style="cursor:pointer">'+esc(f)+
+      (state.sortCol===f?(state.sortDir<0?" \u2193":" \u2191"):"")+'</th>').join("")+'</tr>';
+  const body=rows.map(r=>'<tr><td style="font-weight:500">'+esc(r.period)+'</td>'+
+    '<td class="num" style="color:var(--muted)">'+(r.date?r.date.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"}):"\u2014")+'</td>'+
+    (dim?'<td>'+esc(r.region||"")+'</td>':'')+
+    fields.map(f=>{
+      const v=r.v[f];
+      return '<td class="num">'+(v==null||isNaN(v)?"\u2014":(Math.abs(v)>=100?Math.round(v).toLocaleString("en-IN"):v.toFixed(2)))+'</td>';
+    }).join("")+'</tr>').join("");
+
+  return '<div class="sec"><h2>Records</h2><span class="note">'+rows.length+' row'+(rows.length===1?"":"s")+
+    ' from '+esc((laneById(laneId)||{}).sheet||"")+' \u00b7 sorted newest first unless you pick a column</span></div>'+
+  '<div class="panel"><div class="panel-hd">'+
+    '<div class="rec-tabs">'+lanesOf().map(l=>'<button data-rl="'+l.id+'" aria-pressed="'+(l.id===state.recordsLane)+'">'+esc(l.label)+'</button>').join("")+'</div>'+
+    '<div class="ctl"><input class="search" id="recSearch" placeholder="Filter periods or regions" value="'+esc(state.recordsQuery)+'">'+
+    '<button class="btn" id="csvBtn" style="background:var(--panel);border-color:var(--hair-strong);color:var(--ink-2)">Download CSV</button></div>'+
+  '</div>'+
+  '<div class="scroll"><table class="records">'+head+'<tbody>'+
+    (rows.length?body:'<tr><td colspan="'+(fields.length+3)+'" style="text-align:center;color:var(--muted);padding:28px">Nothing matches that filter. Clear the search or pick more regions.</td></tr>')+
+  '</tbody></table></div></div>';
+}
+
+function footHTML(){
+  return '<div class="foot">'+
+    '<span>Source: <a href="'+SHEET_URL+'" target="_blank" rel="noopener">Delivery Metrics workbook</a> \u2014 '+
+      esc(lanesOf().map(l=>l.sheet).join(", "))+'</span>'+
+    '<span>Percentages are 0\u2013100. TAT is in hours.</span>'+
+    '<span>Cost / revenue isn\u2019t in these sheets yet.</span></div>';
+}
+
+/* ---------- events ---------- */
+function wire(){
+  document.querySelectorAll("[data-card]").forEach(b=>b.onclick=()=>{
+    const id=b.dataset.card;
+    if(state.hiddenCards.has(id)) state.hiddenCards.delete(id); else state.hiddenCards.add(id);
+    render();
+  });
+  document.querySelectorAll("[data-gran]").forEach(b=>b.onclick=()=>{ state.granularity=b.dataset.gran; render(); });
+  document.querySelectorAll("[data-seg]").forEach(b=>b.onclick=()=>{ state.segment=b.dataset.seg; render(); });
+  document.querySelectorAll("[data-region]").forEach(b=>b.onclick=()=>{
+    const r=b.dataset.region;
+    if(regSet().has(r)) regSet().delete(r); else regSet().add(r);
+    if(state.drillRegion&&!regSet().has(state.drillRegion)) state.drillRegion=null;
+    render();
+  });
+  const ra=document.getElementById("regAll");
+  if(ra) ra.onclick=()=>{
+    const all=allRegions();
+    if(regSet().size===all.length) regSet().clear(); else all.forEach(r=>regSet().add(r));
+    render();
+  };
+  document.querySelectorAll("[data-tm]").forEach(b=>b.onclick=()=>{ state.trendMetric=b.dataset.tm; render(); });
+  document.querySelectorAll("[data-split]").forEach(b=>b.onclick=()=>{ state.trendSplit=b.dataset.split; state.hidden.clear(); render(); });
+  document.querySelectorAll("[data-cmode]").forEach(b=>b.onclick=()=>{ state.colorMode=b.dataset.cmode; render(); });
+  document.querySelectorAll("[data-series]").forEach(b=>b.onclick=()=>{
+    const n=b.dataset.series;
+    if(state.hidden.has(n)) state.hidden.delete(n); else state.hidden.add(n);
+    render();
+  });
+  document.querySelectorAll("[data-mm]").forEach(b=>b.onclick=()=>{ state.matrixMetric=b.dataset.mm; render(); });
+  document.querySelectorAll("[data-ml]").forEach(b=>b.onclick=()=>{ state.matrixLane=b.dataset.ml; render(); });
+  document.querySelectorAll("[data-rl]").forEach(b=>b.onclick=()=>{ state.recordsLane=b.dataset.rl; state.sortCol=null; render(); });
+  document.querySelectorAll("[data-drill]").forEach(tr=>tr.onclick=()=>{
+    state.drillRegion = state.drillRegion===tr.dataset.drill ? null : tr.dataset.drill; render();
+  });
+  const dc=document.getElementById("drillClose");
+  if(dc) dc.onclick=(e)=>{ e.stopPropagation(); state.drillRegion=null; render(); };
+  document.querySelectorAll("[data-sort]").forEach(th=>th.onclick=()=>{
+    const f=th.dataset.sort;
+    if(state.sortCol===f) state.sortDir*=-1; else { state.sortCol=f; state.sortDir=-1; }
+    render();
+  });
+  const rs=document.getElementById("recSearch");
+  if(rs) rs.oninput=()=>{
+    state.recordsQuery=rs.value;
+    const at=rs.selectionStart; render();
+    const el=document.getElementById("recSearch");
+    if(el){ el.focus(); el.setSelectionRange(at,at); }
+  };
+  const csv=document.getElementById("csvBtn");
+  if(csv) csv.onclick=downloadCSV;
+
+  /* chart tooltips */
+  const tip=document.getElementById("tip");
+  document.querySelectorAll(".pt").forEach(c=>{
+    c.addEventListener("mouseenter",e=>{
+      tip.innerHTML="<b>"+c.dataset.v+"</b> \u00b7 "+c.dataset.label+"<br>"+c.dataset.x;
+      tip.style.opacity="1";
+    });
+    c.addEventListener("mousemove",e=>{
+      tip.style.left=(e.clientX+14)+"px"; tip.style.top=(e.clientY-46)+"px";
+    });
+    c.addEventListener("mouseleave",()=>{ tip.style.opacity="0"; });
+  });
+}
+
+function downloadCSV(){
+  const laneId=state.recordsLane, dim=(laneById(laneId)||{}).dim;
+  const fields=recordFields(laneId), rows=recordRows();
+  const head=["period","date"].concat(dim?["region"]:[]).concat(fields);
+  const lines=[head.join(",")].concat(rows.map(r=>{
+    const base=[r.period, r.date?r.date.toISOString().slice(0,10):""].concat(dim?[r.region||""]:[]);
+    return base.concat(fields.map(f=>r.v[f]==null?"":r.v[f])).map(c=>{
+      const s=String(c);
+      return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+    }).join(",");
+  }));
+  const blob=new Blob([lines.join("\n")],{type:"text/csv;charset=utf-8;"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=laneId+"_"+state.granularity+"_"+new Date().toISOString().slice(0,10)+".csv";
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+document.getElementById("refreshBtn").onclick=loadAll;
+/* The masthead condenses once you scroll so the frozen bar stays slim. */
+window.addEventListener("scroll",function(){
+  const m=document.querySelector(".mast");
+  if(!m) return;
+  const want=window.scrollY>56;
+  if(want!==m.classList.contains("compact")){ m.classList.toggle("compact",want); syncSticky(); }
+},{passive:true});
+window.addEventListener("resize",syncSticky);
+syncSticky();
+loadAll();
+</script>
+</body>
+</html>
