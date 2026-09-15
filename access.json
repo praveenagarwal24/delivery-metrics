@@ -1,6 +1,8 @@
 {
   "users": [
     { "email": "praveen@spyne.ai", "role": "admin" },
-    { "email": "teammate@spyne.ai", "role": "viewer" }
+    { "email": "kishor@spyne.ai", "role": "viewer" },
+    { "email": "nitin.kumar@spyne.ai", "role": "viewer" },
+    { "email": "ranbir.manoranjan@spyne.ai", "role": "viewer" }
   ]
 }
