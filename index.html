@@ -141,6 +141,7 @@ tbody tr[aria-selected="true"]{background:var(--teal-soft);box-shadow:inset 2px 
 .tip{position:fixed;pointer-events:none;background:var(--deep);color:#EAF2F1;padding:7px 10px;border-radius:7px;font-size:12px;opacity:0;transition:opacity .1s;z-index:50;white-space:nowrap}
 .tip b{color:#fff}
 .gate{min-height:calc(100vh - 96px);display:flex;align-items:center;justify-content:center;padding:24px}
+.gate[hidden]{display:none}
 .gate-card{background:var(--panel);border:1px solid var(--hair);border-radius:var(--r-panel);
   padding:40px 36px;max-width:430px;width:100%;text-align:center}
 .gate-card h2{margin:0 0 8px;font-size:19px;font-weight:600}
@@ -205,7 +206,7 @@ const SHEET_ID = "16vFElbOV8Awd63R6-WlsNdAScWNE18xGUPFkzE0GN7c";
    e.g. https://praveenagarwal24.github.io  (origin only, no path).
    NOTE: this gates the UI. It is not a security boundary - the file is public
    and the sheets stay link-readable. Don't treat it as access control.        */
-const GOOGLE_CLIENT_ID = "901106520525-esbje4h736ogtssddoiinflf56tb1gfb.apps.googleusercontent.com";                       // <-- paste Client ID here
+const GOOGLE_CLIENT_ID = "";                       // <-- paste Client ID here
 const ALLOWED_DOMAINS  = ["spyne.ai","spyne.co.in"];
 const ADMINS           = ["praveen@spyne.ai"];     // always admin, even if the sheet says otherwise
 /* Per-person access lives in access.json, sitting next to this file in the repo,
