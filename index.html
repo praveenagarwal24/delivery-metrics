@@ -309,7 +309,11 @@ function logSignIn(user){
     const body=new URLSearchParams();
     if(LOGIN_LOG.fields.email) body.append(LOGIN_LOG.fields.email, user.email);
     if(LOGIN_LOG.fields.role)  body.append(LOGIN_LOG.fields.role, user.admin?"admin":"viewer");
-    fetch(LOGIN_LOG.formUrl,{method:"POST",mode:"no-cors",body:body}).catch(function(){});
+    /* credentials:"include" sends the browser's Google session with the POST,
+       so the form can stay restricted to Spyne accounts instead of being open
+       to anyone with the link. Harmless if the form is public. */
+    fetch(LOGIN_LOG.formUrl,{method:"POST",mode:"no-cors",credentials:"include",body:body})
+      .catch(function(){});
   }catch(e){ /* logging must never break sign-in */ }
 }
 /* Anything config.json sets wins over the defaults above. A missing or broken
