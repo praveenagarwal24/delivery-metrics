@@ -201,14 +201,20 @@ tbody tr[aria-selected="true"]{background:var(--teal-soft);box-shadow:inset 2px 
 const SHEET_ID = "16vFElbOV8Awd63R6-WlsNdAScWNE18xGUPFkzE0GN7c";
 
 /* ---- Sign-in ------------------------------------------------------------
-   Paste the OAuth Client ID from Google Cloud Console below. The authorised
-   JavaScript origin there must exactly match where this page is served from,
-   e.g. https://praveenagarwal24.github.io  (origin only, no path).
+   These are DEFAULTS. config.json, sitting next to this file in the repo,
+   overrides every one of them at load:
+     { "clientId": "....apps.googleusercontent.com",
+       "allowedDomains": ["spyne.ai","spyne.co.in"],
+       "admins": ["praveen@spyne.ai"],
+       "contact": "praveen@spyne.ai" }
+   Keeping them there means this file can be replaced wholesale without
+   re-pasting anything. If config.json is missing, the values below are used.
    NOTE: this gates the UI. It is not a security boundary - the file is public
    and the sheets stay link-readable. Don't treat it as access control.        */
-const GOOGLE_CLIENT_ID = "901106520525-esbje4h736ogtssddoiinflf56tb1gfb.apps.googleusercontent.com";                       // <-- paste Client ID here
-const ALLOWED_DOMAINS  = ["spyne.ai","spyne.co.in"];
-const ADMINS           = ["praveen@spyne.ai"];     // always admin, even if the sheet says otherwise
+const CONFIG_FILE      = "config.json";
+let   GOOGLE_CLIENT_ID = "";
+let   ALLOWED_DOMAINS  = ["spyne.ai","spyne.co.in"];
+let   ADMINS           = ["praveen@spyne.ai"];     // always admin, whatever access.json says
 /* Per-person access lives in access.json, sitting next to this file in the repo,
    so adding someone is a small commit rather than an edit to this whole page:
      { "users": [ {"email":"praveen@spyne.ai","role":"admin"},
@@ -217,7 +223,7 @@ const ADMINS           = ["praveen@spyne.ai"];     // always admin, even if the 
    If the file is missing, the dashboard falls back to letting any
    ALLOWED_DOMAINS address in — so nothing breaks before you create it.        */
 const ACCESS_FILE      = "access.json";
-const ACCESS_CONTACT   = "praveen@spyne.ai";       // where access requests are sent
+let   ACCESS_CONTACT   = "praveen@spyne.ai";       // where access requests are sent
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit";
 
 function mkMetrics(lastId,lastLabel){
@@ -285,6 +291,21 @@ function regSet(){
 }
 
 /* ---------- sign-in ---------- */
+/* Anything config.json sets wins over the defaults above. A missing or broken
+   file is not fatal - we just keep the defaults. */
+async function loadConfig(){
+  try{
+    const r=await fetch(CONFIG_FILE+"?_="+Date.now(),{cache:"no-store"});
+    if(!r.ok) return;
+    const c=await r.json();
+    if(c && typeof c.clientId==="string" && c.clientId.trim()) GOOGLE_CLIENT_ID=c.clientId.trim();
+    if(c && Array.isArray(c.allowedDomains) && c.allowedDomains.length)
+      ALLOWED_DOMAINS=c.allowedDomains.map(d=>String(d).trim().toLowerCase()).filter(Boolean);
+    if(c && Array.isArray(c.admins) && c.admins.length)
+      ADMINS=c.admins.map(e=>String(e).trim().toLowerCase()).filter(Boolean);
+    if(c && typeof c.contact==="string" && c.contact.trim()) ACCESS_CONTACT=c.contact.trim();
+  }catch(e){ /* keep defaults */ }
+}
 function decodeJwt(tok){
   const p=tok.split(".")[1];
   const j=atob(p.replace(/-/g,"+").replace(/_/g,"/"));
@@ -335,7 +356,7 @@ function showGate(){
   renderTabs(); renderSync();
   if(!GOOGLE_CLIENT_ID){
     document.getElementById("gateMsg").textContent=
-      "Sign-in isn\u2019t configured yet \u2014 paste your Google OAuth Client ID into GOOGLE_CLIENT_ID at the top of this file.";
+      "Sign-in isn\u2019t configured yet \u2014 add your Google OAuth Client ID to "+CONFIG_FILE+" in the repo.";
     return;
   }
   waitForGsi();
@@ -1156,7 +1177,7 @@ window.addEventListener("scroll",function(){
 },{passive:true});
 window.addEventListener("resize",syncSticky);
 syncSticky();
-if(restoreSession()) showApp(); else showGate();
+loadConfig().then(function(){ if(restoreSession()) showApp(); else showGate(); });
 </script>
 </body>
 </html>
