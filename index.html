@@ -158,6 +158,22 @@ tbody tr[aria-selected="true"]{background:var(--teal-soft);box-shadow:inset 2px 
 .linky-dark:hover{color:#DCEAE8}
 .admin-tag{font-size:10.5px;font-weight:600;letter-spacing:.04em;padding:2px 8px;border-radius:var(--r-pill);
   background:var(--teal-soft);color:var(--teal);text-transform:uppercase;margin-left:8px}
+.rgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:18px}
+.rcard{background:var(--panel);border:1px solid var(--hair);border-radius:var(--r-panel);padding:16px 18px 10px}
+.rcard-hd{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.rcard-hd h3{margin:0;font-size:14.5px;font-weight:600}
+.rcard-rate{font-size:19px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.rcard-sub{display:flex;justify-content:space-between;gap:12px;margin:3px 0 12px;
+  font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.rsns{list-style:none;margin:0;padding:0;max-height:300px;overflow-y:auto}
+.rsn{padding:7px 0 9px;border-top:1px solid var(--hair)}
+.rsn:first-child{border-top:0}
+.rsn-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.rsn-lab{font-size:12.5px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rsn-num{font-size:12px;color:var(--muted);white-space:nowrap}
+.rsn-dot{opacity:.5}
+.rsn-track{margin-top:6px;height:5px;border-radius:3px;background:var(--panel-sunk);overflow:hidden}
+.rsn-track i{display:block;height:100%;border-radius:3px}
 .foot{margin-top:34px;padding-top:16px;border-top:1px solid var(--hair-strong);font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 18px}
 .foot a{color:var(--teal)}
 @media (max-width:1080px){.lanes{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
@@ -261,15 +277,42 @@ const PRODUCTS = [
       { id:"region", label:"Region",  sheet:"images_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
   { id:"spin", label:"360", status:"live", metrics:mkMetrics("delivery_pct","Fulfilment","Cost / spin"),
+    /* Fixed panels, independent of every filter. Swap "rows" for "sheet" once
+       the tabs exist and the same renderer reads them from the workbook.      */
+    panels:[
+      { title:"QC Failed reasons", subtitle:"Blocker severity issues", tone:"red",
+        rate:0.023, total:357, rows:[
+          {label:"Warping",            count:144, pct:0.0091},
+          {label:"Placement",          count:77,  pct:0.0049},
+          {label:"CompleteCar - RBG",  count:38,  pct:0.0024},
+          {label:"Exposure",           count:28,  pct:0.0018},
+          {label:"RoofRail - RBG",     count:23,  pct:0.0015}
+        ]},
+      { title:"Validation Failed reasons", subtitle:"Failure reasons", tone:"red",
+        rate:0.116, total:1834, rows:[
+          {label:"Spin frames must be greater than or equal to 6", count:800, pct:0.0507},
+          {label:"Incomplete Round",   count:474, pct:0.0300},
+          {label:"Bad Input",          count:256, pct:0.0162},
+          {label:"Less Then Five Image",count:91, pct:0.0058},
+          {label:"Extra sticker / banner", count:57, pct:0.0036}
+        ]},
+      { title:"Tech & AI Failure reasons", subtitle:"Failure reasons", tone:"amber",
+        rate:0.014, total:221, rows:[
+          {label:"crop_video pipeline failed",       count:76, pct:0.0048},
+          {label:"Create Payload Function error",    count:38, pct:0.0024},
+          {label:"Frame Extraction Failed",          count:27, pct:0.0017},
+          {label:"Not enough images left after filtering for cropped", count:18, pct:0.0011},
+          {label:"Colmap/Warping Failed",            count:11, pct:0.0007}
+        ]}
+    ],
     lanes:[
       { id:"spin",   label:"Spin",    sheet:"360_spin",   color:"var(--s1)", blurb:"Every spin delivered" },
       { id:"rt",     label:"Rooftop", sheet:"360_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
       { id:"region", label:"Region",  sheet:"360_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
   { id:"video", label:"Video", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / video"),
-    /* A fixed breakdown that doesn't move with the filters. */
-    extra:{ sheet:"video_ff", title:"Why fulfilment misses",
-            note:"From the video_ff tab \u2014 fixed, not affected by the filters above" },
+    panels:[{ sheet:"video_ff", title:"Fulfilment failure reasons",
+              subtitle:"Failure reasons", tone:"red" }],
     lanes:[
       { id:"vin",    label:"VIN",     sheet:"video_vin",    color:"var(--s1)", blurb:"Every vehicle delivered" },
       { id:"rt",     label:"Rooftop", sheet:"video_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
@@ -853,33 +896,57 @@ function costSeries(laneId, metric, prefix, regionsOverride){
   });
 }
 
-/* A product can carry one fixed table that ignores every filter. */
+/* Fixed panels that ignore every filter. Rows come either from the config or
+   from a workbook tab shaped reason | count | %. */
 async function loadExtra(prod){
-  if(!prod || !prod.extra || !prod.extra.sheet) return null;
-  try{
-    const t=await fetchTable(prod.extra.sheet);
-    return { cols:t.cols.map(c=>String(c.label||"").trim()),
-             rows:t.rows.map(r=>(r.c||[]).map(c=>c?c.v:null)) };
-  }catch(e){ return null; }
+  if(!prod || !prod.panels) return null;
+  const out={};
+  await Promise.all(prod.panels.filter(p=>p.sheet).map(async function(p){
+    try{
+      const t=await fetchTable(p.sheet);
+      const labels=t.cols.map(c=>String(c.label||"").trim());
+      const num=i=>t.rows.some(r=>r.c&&r.c[i]&&typeof r.c[i].v==="number");
+      const li=labels.findIndex((l,i)=>!num(i));
+      const pi=labels.findIndex((l,i)=>num(i)&&/^%$|pct|percent|share|rate/i.test(l));
+      const ci=labels.findIndex((l,i)=>num(i)&&i!==pi);
+      out[p.sheet]=t.rows.map(function(r){
+        const g=i=> (i>=0&&r.c&&r.c[i]&&r.c[i].v!=null) ? r.c[i].v : null;
+        const pct=g(pi);
+        return { label:String(g(li)==null?"":g(li)), count:Number(g(ci))||0,
+                 pct: pct==null?null:(pct>1?pct/100:pct) };
+      }).filter(x=>x.label);
+    }catch(e){ out[p.sheet]=null; }
+  }));
+  return out;
 }
 function extraHTML(){
   const prod=PRODUCTS.find(p=>p.id===state.product);
-  if(!prod || !prod.extra || !state.extra || !state.extra.rows.length) return "";
-  const cols=state.extra.cols;
-  const isPct=i=>/^%$|pct|percent|share/i.test(cols[i]||"");
-  const cell=(v,i)=>{
-    if(v==null||v==="") return "\u2014";
-    if(typeof v==="number")
-      return isPct(i) ? (v<=1 ? (v*100).toFixed(2) : v.toFixed(2))+"%" : v.toLocaleString("en-IN");
-    return esc(v);
-  };
-  const head='<tr>'+cols.map((c,i)=>'<th'+(i===0?' style="text-align:left"':'')+'>'+esc(c)+'</th>').join("")+'</tr>';
-  const body=state.extra.rows.map(r=>'<tr>'+cols.map((c,i)=>
-    '<td'+(i===0?' style="text-align:left"':' class="num"')+'>'+cell(r[i],i)+'</td>').join("")+'</tr>').join("");
-  return '<div class="sec"><h2>'+esc(prod.extra.title||prod.extra.sheet)+'</h2>'+
-    '<span class="note">'+esc(prod.extra.note||"")+'</span></div>'+
-    '<div class="panel"><div class="scroll" style="max-height:none"><table class="records">'+
-    head+'<tbody>'+body+'</tbody></table></div></div>';
+  if(!prod || !prod.panels) return "";
+  const pct=v=>(v==null?"\u2014":(v*100).toFixed(2)+"%");
+  const cards=prod.panels.map(function(p){
+    const rows = p.rows || (state.extra && state.extra[p.sheet]) || null;
+    if(!rows || !rows.length) return "";
+    const tone = p.tone==="amber" ? "var(--warn)" : "var(--down)";
+    const rate = p.rate!=null ? p.rate : rows.reduce((a,r)=>a+(r.pct||0),0);
+    const total= p.total!=null ? p.total : rows.reduce((a,r)=>a+(r.count||0),0);
+    const max  = Math.max.apply(null, rows.map(r=>r.count||0)) || 1;
+    const body = rows.map(function(r){
+      return '<li class="rsn"><div class="rsn-top"><span class="rsn-lab">'+esc(r.label)+'</span>'+
+        '<span class="rsn-num num">'+(r.count||0).toLocaleString("en-IN")+
+        ' <span class="rsn-dot">\u00b7</span> <b style="color:'+tone+'">'+pct(r.pct)+'</b></span></div>'+
+        '<div class="rsn-track"><i style="width:'+Math.max(2,((r.count||0)/max)*100).toFixed(1)+
+        '%;background:'+tone+'"></i></div></li>';
+    }).join("");
+    return '<section class="rcard"><div class="rcard-hd">'+
+      '<h3>'+esc(p.title)+'</h3><span class="rcard-rate" style="color:'+tone+'">'+pct(rate)+'</span></div>'+
+      '<div class="rcard-sub"><span>'+esc(p.subtitle||"")+' \u00b7 all reasons</span>'+
+      '<span>of reviewed \u00b7 '+total.toLocaleString("en-IN")+'</span></div>'+
+      '<ul class="rsns">'+body+'</ul></section>';
+  }).join("");
+  if(!cards.replace(/\s/g,"")) return "";
+  return '<div class="sec"><h2>Failure reasons</h2>'+
+    '<span class="note">Fixed \u2014 not affected by the filters above</span></div>'+
+    '<div class="rgrid">'+cards+'</div>';
 }
 
 /* ---------- selectors ---------- */
