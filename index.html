@@ -159,6 +159,15 @@ tbody tr[aria-selected="true"]{background:var(--teal-soft);box-shadow:inset 2px 
 .admin-tag{font-size:10.5px;font-weight:600;letter-spacing:.04em;padding:2px 8px;border-radius:var(--r-pill);
   background:var(--teal-soft);color:var(--teal);text-transform:uppercase;margin-left:8px}
 .rgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:18px}
+.ev-card{grid-column:1/-1}
+.evs{list-style:none;margin:0;padding:0;max-height:340px;overflow-y:auto}
+.ev{display:flex;gap:16px;padding:11px 0;border-top:1px solid var(--hair)}
+.ev:first-child{border-top:0}
+.ev-when{flex:0 0 58px;font-size:12px;color:var(--muted);padding-top:2px}
+.ev-body{flex:1 1 auto;min-width:0}
+.ev-tag{display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  padding:2px 8px;border-radius:var(--r-pill);background:var(--panel-sunk);color:var(--ink-2)}
+.ev-body p{margin:5px 0 0;font-size:13px;color:var(--ink-2);line-height:1.5}
 .rcard{background:var(--panel);border:1px solid var(--hair);border-radius:var(--r-panel);padding:16px 18px 10px}
 .rcard-hd{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 .rcard-hd h3{margin:0;font-size:14.5px;font-weight:600}
@@ -271,6 +280,7 @@ function mkMetrics(lastId,lastLabel,costLabel){
 
 const PRODUCTS = [
   { id:"images", label:"Images", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / image"),
+    panels:[{ sheet:"Image_ff", title:"What affected delivery", kind:"log" }],
     lanes:[
       { id:"vin",    label:"VIN",     sheet:"images_vin",    color:"var(--s1)", blurb:"Every vehicle delivered" },
       { id:"rt",     label:"Rooftop", sheet:"images_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
@@ -368,7 +378,7 @@ const SERIES_COLORS = ["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--s5
 const state = {
   product:"images", granularity:"month", segment:"all",
   regions:{}, regionsInit:{},
-  trendMetric:"sla_pct", trendSplit:"lane", colorMode:"auto", hiddenCards:new Set(),
+  trendMetric:"sla_pct", trendSplit:"lane", colorMode:"auto", hiddenCards:new Set(["p95_tat_hrs"]),   // off until its chip is clicked
   matrixMetric:"sla_pct", matrixLane:"vin",
   drillRegion:null, recordsLane:"vin", recordsQuery:"", hidden:new Set(),
   sortCol:null, sortDir:-1,
@@ -905,6 +915,15 @@ async function loadExtra(prod){
     try{
       const t=await fetchTable(p.sheet);
       const labels=t.cols.map(c=>String(c.label||"").trim());
+      if(p.kind==="log"){
+        const di=t.cols.findIndex(c=>c.type==="date"||c.type==="datetime");
+        const strs=t.cols.map((c,i)=>i).filter(i=>i!==di && labels[i]!=="");
+        out[p.sheet]=t.rows.map(function(r){
+          const g=i=> (i>=0&&r.c&&r.c[i]&&r.c[i].v!=null) ? r.c[i].v : null;
+          return { at:toDate(g(di)), by:String(g(strs[0])||""), text:String(g(strs[1])||g(strs[0])||"") };
+        }).filter(x=>x.text).sort((a,b)=>(a.at&&b.at)?b.at-a.at:0);
+        return;
+      }
       const num=i=>t.rows.some(r=>r.c&&r.c[i]&&typeof r.c[i].v==="number");
       const li=labels.findIndex((l,i)=>!num(i));
       const pi=labels.findIndex((l,i)=>num(i)&&/^%$|pct|percent|share|rate/i.test(l));
@@ -926,6 +945,17 @@ function extraHTML(){
   const cards=prod.panels.map(function(p){
     const rows = p.rows || (state.extra && state.extra[p.sheet]) || null;
     if(!rows || !rows.length) return "";
+    if(p.kind==="log"){
+      const items=rows.map(function(r){
+        return '<li class="ev"><div class="ev-when num">'+
+          (r.at ? esc(r.at.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})) : "\u2014")+'</div>'+
+          '<div class="ev-body"><span class="ev-tag">'+esc(r.by||"\u2014")+'</span>'+
+          '<p>'+esc(r.text)+'</p></div></li>';
+      }).join("");
+      return '<section class="rcard ev-card"><div class="rcard-hd"><h3>'+esc(p.title)+'</h3>'+
+        '<span class="rcard-rate" style="font-size:13px;color:var(--muted)">'+rows.length+
+        ' logged</span></div><ul class="evs">'+items+'</ul></section>';
+    }
     const tone = p.tone==="amber" ? "var(--warn)" : "var(--down)";
     const rate = p.rate!=null ? p.rate : rows.reduce((a,r)=>a+(r.pct||0),0);
     const total= p.total!=null ? p.total : rows.reduce((a,r)=>a+(r.count||0),0);
@@ -944,7 +974,8 @@ function extraHTML(){
       '<ul class="rsns">'+body+'</ul></section>';
   }).join("");
   if(!cards.replace(/\s/g,"")) return "";
-  return '<div class="sec"><h2>Failure reasons</h2>'+
+  const isLog=prod.panels.every(p=>p.kind==="log");
+  return '<div class="sec"><h2>'+(isLog?"Delivery incidents":"Failure reasons")+'</h2>'+
     '<span class="note">Fixed \u2014 not affected by the filters above</span></div>'+
     '<div class="rgrid">'+cards+'</div>';
 }
@@ -1095,10 +1126,14 @@ function sparkline(series,metric,labels){
   if(idx.length<2) return '<div class="spark" style="height:120px"></div>';
   const W=240,H=124,padT=20,padB=20,padX=22;
   const vals=idx.map(i=>series[i]);
-  const min=Math.min(...vals),max=Math.max(...vals),span=(max-min)||1;
+  const min=Math.min(...vals),max=Math.max(...vals);
+  const flat=(max-min)===0;            // every value identical
+  const span=(max-min)||1;
   const n=series.length, base=H-padB;
   const x=i=> n>1 ? padX+i*(W-padX*2)/(n-1) : W/2;
-  const y=v=> padT+(base-padT)*(1-(v-min)/span);
+  /* A flat series would otherwise sit on the baseline with nothing to fill,
+     so park it mid-height instead. */
+  const y=v=> flat ? padT+(base-padT)*0.45 : padT+(base-padT)*(1-(v-min)/span);
   const pts=idx.map(i=>[x(i),y(series[i]),i]);
   const tones=pts.map((p,k)=> k===0 ? null : stepTone(metric,series[pts[k-1][2]],series[p[2]]));
   let svg='<svg class="spark" viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" role="img" aria-label="'+
@@ -1107,7 +1142,7 @@ function sparkline(series,metric,labels){
   for(let k=1;k<pts.length;k++){
     const a=pts[k-1],b=pts[k],c=toneColor(tones[k]);
     svg+='<path d="M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+' L'+b[0].toFixed(1)+' '+b[1].toFixed(1)+
-         ' L'+b[0].toFixed(1)+' '+base+' L'+a[0].toFixed(1)+' '+base+' Z" fill="'+c+'" opacity=".09"/>';
+         ' L'+b[0].toFixed(1)+' '+base+' L'+a[0].toFixed(1)+' '+base+' Z" fill="'+c+'" opacity=".12"/>';
     svg+='<path d="M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+' L'+b[0].toFixed(1)+' '+b[1].toFixed(1)+
          '" fill="none" stroke="'+c+'" stroke-width="2" stroke-linecap="round"/>';
   }
