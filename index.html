@@ -158,6 +158,11 @@ tbody tr[aria-selected="true"]{background:var(--teal-soft);box-shadow:inset 2px 
 .linky-dark:hover{color:#DCEAE8}
 .admin-tag{font-size:10.5px;font-weight:600;letter-spacing:.04em;padding:2px 8px;border-radius:var(--r-pill);
   background:var(--teal-soft);color:var(--teal);text-transform:uppercase;margin-left:8px}
+.rlegend{display:flex;flex-wrap:wrap;gap:5px;padding:0 4px 11px}
+.rchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--hair-strong);background:var(--panel);
+  border-radius:var(--r-pill);padding:3px 9px;font-size:11.5px;color:var(--ink-2);line-height:1}
+.rchip[aria-pressed="false"]{opacity:.42}
+.rchip[aria-pressed="false"] .swatch{background:var(--flat)!important}
 .rgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:18px}
 .ev-card{grid-column:1/-1}
 .evs{list-style:none;margin:0;padding:0;max-height:340px;overflow-y:auto}
@@ -266,9 +271,9 @@ const SHEET_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit"
    "sum" for totals, "ratio" for one total divided by another.
    needs lists the sheet columns required - a metric with a missing column is
    simply not offered, so cost appears on its own once the columns land.        */
-function mkMetrics(lastId,lastLabel,costLabel){
+function mkMetrics(lastId,lastLabel,costLabel,slaHrs){
   return [
-    { id:"sla_pct",     label:"SLA met",   kind:"pct", better:"high" },
+    { id:"sla_pct",     label:"SLA < "+(slaHrs||6)+" hrs", kind:"pct", better:"high" },
     { id:"p99_tat_hrs", label:"TAT (P99)", kind:"hrs", better:"low"  },
     { id:"p95_tat_hrs", label:"TAT (P95)", kind:"hrs", better:"low"  },
     /* Cost per unit only. Total cost and volume are still queried - the ratio
@@ -279,14 +284,14 @@ function mkMetrics(lastId,lastLabel,costLabel){
 }
 
 const PRODUCTS = [
-  { id:"images", label:"Images", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / image"),
+  { id:"images", label:"Images", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / image",6),
     panels:[{ sheet:"Image_ff", title:"What affected delivery", kind:"log" }],
     lanes:[
       { id:"vin",    label:"VIN",     sheet:"images_vin",    color:"var(--s1)", blurb:"Every vehicle delivered" },
       { id:"rt",     label:"Rooftop", sheet:"images_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
       { id:"region", label:"Region",  sheet:"images_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
-  { id:"spin", label:"360", status:"live", metrics:mkMetrics("delivery_pct","Fulfilment","Cost / spin"),
+  { id:"spin", label:"360", status:"live", metrics:mkMetrics("delivery_pct","Fulfilment","Cost / spin",6),
     /* Fixed panels, independent of every filter. Swap "rows" for "sheet" once
        the tabs exist and the same renderer reads them from the workbook.      */
     panels:[
@@ -320,7 +325,7 @@ const PRODUCTS = [
       { id:"rt",     label:"Rooftop", sheet:"360_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
       { id:"region", label:"Region",  sheet:"360_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
-  { id:"video", label:"Video", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / video"),
+  { id:"video", label:"Video", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / video",8),
     panels:[{ sheet:"video_ff", title:"Fulfilment failure reasons",
               subtitle:"Failure reasons", tone:"red" }],
     lanes:[
@@ -1128,6 +1133,44 @@ function stepTone(metric,prev,cur){
 }
 function toneColor(t){ return t==="up"?"var(--up)":t==="down"?"var(--down)":"var(--flat)"; }
 /* Keep small movements looking small. */
+function regionColor(r){
+  const i=allRegions().indexOf(r);
+  return SERIES_COLORS[(i<0?0:i)%SERIES_COLORS.length];
+}
+/* One line per region on the region card, coloured to match the chips. */
+function sparkMulti(seriesList, metric, labels){
+  const all=[]; seriesList.forEach(s=>s.values.forEach(v=>{ if(v!=null) all.push(v); }));
+  if(all.length<2) return '<div class="spark" style="height:120px"></div>';
+  const W=240,H=124,padT=16,padB=20,padL=16,padR=54;
+  const r=niceRange(metric, Math.min(...all), Math.max(...all));
+  const span=(r.hi-r.lo)||1, base=H-padB, n=labels.length;
+  const x=i=> n>1 ? padL+i*(W-padL-padR)/(n-1) : (W-padR)/2;
+  const y=v=> padT+(base-padT)*(1-(v-r.lo)/span);
+  let svg='<svg class="spark" viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" '+
+    'role="img" aria-label="'+esc(metric.label)+' by region">';
+  svg+='<line x1="0" y1="'+base+'" x2="'+W+'" y2="'+base+'" stroke="var(--hair-strong)" stroke-width="1"/>';
+  const placed=[];
+  seriesList.forEach(function(sr){
+    const pts=[];
+    sr.values.forEach((v,i)=>{ if(v!=null) pts.push([x(i),y(v),i,v]); });
+    if(!pts.length) return;
+    if(pts.length>1)
+      svg+='<path d="'+pts.map((p,k)=>(k?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ")+
+           '" fill="none" stroke="'+sr.color+'" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/>';
+    const last=pts[pts.length-1];
+    svg+='<circle cx="'+last[0].toFixed(1)+'" cy="'+last[1].toFixed(1)+'" r="2.9" fill="'+sr.color+'"/>';
+    let ly=last[1]+3.4;                       // nudge labels apart when lines converge
+    while(placed.some(q=>Math.abs(q-ly)<9.5)) ly+=9.5;
+    if(ly>H-padB-1) ly=H-padB-1;
+    placed.push(ly);
+    svg+='<text x="'+(W-padR+5)+'" y="'+ly.toFixed(1)+'" font-size="9.5" font-weight="600" fill="'+
+         sr.color+'">'+fmt(metric,last[3])+'</text>';
+  });
+  labels.forEach((lab,i)=>{
+    svg+='<text x="'+x(i).toFixed(1)+'" y="'+(H-5)+'" text-anchor="middle" font-size="10.5" fill="var(--muted)">'+esc(lab)+'</text>';
+  });
+  return svg+'</svg>';
+}
 function niceRange(metric, min, max){
   let lo=min, hi=max;
   const level=Math.abs((min+max)/2)||1;
@@ -1383,10 +1426,19 @@ function glanceHTML(){
   lanesOf().forEach(lane=>{
     html+='<section class="lane"><div class="lane-hd"><h3><span class="swatch" style="background:'+lane.color+'"></span>'+
       esc(lane.label)+'</h3><span class="sub">'+esc(lane.blurb)+
-      (lane.id==="region"?' \u00b7 '+activeRegions().length+' selected':'')+'</span></div><div class="cards">';
+      (lane.id==="region"?' \u00b7 '+activeRegions().length+' of '+allRegions().length:'')+'</span></div>'+
+      (lane.id==="region" ? '<div class="rlegend">'+allRegions().map(r=>
+         '<button class="rchip" data-region="'+esc(r)+'" aria-pressed="'+regSet().has(r)+
+         '"><span class="swatch" style="background:'+regionColor(r)+'"></span>'+esc(r)+'</button>').join("")+
+       '</div>' : '')+
+      '<div class="cards">';
     metricsOf().filter(m=>!state.hiddenCards.has(m.id)).forEach(m=>{
       const series=metricSeries(lane.id,m);
       const t=lastTwo(series), d=fmtDelta(m,t.cur,t.prev);
+      const perRegion = lane.id==="region"
+        ? activeRegions().map(r=>({ name:r, color:regionColor(r),
+                                    values:metricSeries("region",m,null,[r]) }))
+        : null;
       html+='<article class="card"><div class="card-top"><span class="name">'+esc(m.label)+
         (lane.id==="region"?' <span style="font-weight:400;color:var(--muted)">'+
           ((m.agg==="sum")?"total":"avg")+'</span>':'')+'</span>'+
@@ -1396,7 +1448,9 @@ function glanceHTML(){
         '</span></div>'+
         '<div class="val num">'+fmt(m,t.cur)+'</div>'+
         '<div class="cmp num">'+(t.prev!=null?"was "+fmt(m,t.prev):"no prior period")+'</div>'+
-        sparkline(series,m,periodsOf())+'</article>';
+        (perRegion && perRegion.length
+           ? sparkMulti(perRegion,m,periodsOf())
+           : sparkline(series,m,periodsOf()))+'</article>';
     });
     html+='</div></section>';
   });
