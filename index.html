@@ -72,6 +72,8 @@ select.inp{background:var(--panel);border:1px solid var(--hair-strong);border-ra
 .chips{display:flex;flex-wrap:wrap;gap:5px}
 .chip{border:1px solid var(--hair-strong);background:var(--panel);border-radius:var(--r-pill);padding:4px 11px;font-size:12.5px;color:var(--ink-2);white-space:nowrap}
 .chip-sm{padding:3px 10px;font-size:12px}
+.chip-r{display:inline-flex;align-items:center;gap:6px}
+.chip-r[aria-pressed="true"] .swatch{box-shadow:0 0 0 1.5px rgba(255,255,255,.6)}
 .sec-tools{margin-left:auto;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .chip[aria-pressed="true"]{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:500}
 .linky{background:none;border:0;color:var(--teal);font-size:12.5px;text-decoration:underline;padding:0}
@@ -389,7 +391,7 @@ const SERIES_COLORS = ["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--s5
 const state = {
   product:"images", granularity:"month", segment:"all",
   regions:{}, regionsInit:{},
-  trendMetric:"sla_pct", trendSplit:"lane", colorMode:"auto", hiddenCards:new Set(["p95_tat_hrs"]),   // off until its chip is clicked
+  trendMetric:"sla_pct", trendSplit:"lane", colorMode:"auto", scale:"linear", hiddenCards:new Set(["p95_tat_hrs"]),   // off until its chip is clicked
   matrixMetric:"sla_pct", matrixLane:"vin",
   drillRegion:null, recordsLane:"vin", recordsQuery:"", hidden:new Set(),
   sortCol:null, sortDir:-1,
@@ -871,7 +873,11 @@ function costSegmentOf(segment){
   const map=(COST&&COST.segmentMap)||{ ent:["enterprise"], mid:["mid-market","mid market","midmarket","mid"],
                                        resellers:["reseller","resellers"], smb:["smb"] };
   const s=normKey(segment);
+  if(!s) return null;
   for(const k in map) if(map[k].some(v=>normKey(v)===s)) return k;
+  /* Fall back to containment so "Enterprise - Tier 1" or "SMB (new)" still land. */
+  for(const k in map) if(map[k].some(function(v){ const nv=normKey(v);
+    return nv && (s.indexOf(nv)===0 || nv.indexOf(s)===0 || s.indexOf(nv)>=0); })) return k;
   return null;
 }
 async function loadCost(){
@@ -1148,15 +1154,16 @@ function sparkMulti(seriesList, metric, labels){
   const all=[]; seriesList.forEach(s=>s.values.forEach(v=>{ if(v!=null) all.push(v); }));
   if(all.length<2) return '<div class="spark" style="height:120px"></div>';
   const W=240,H=112,padT=12,padB=19,padL=12,padR=12;
-  const r=niceRange(metric, Math.min(...all), Math.max(...all));
-  const span=(r.hi-r.lo)||1, base=H-padB, n=labels.length;
+  const base=H-padB, n=labels.length;
+  const sc=makeScale(metric, all, padT, base);
   const x=i=> n>1 ? padL+i*(W-padL-padR)/(n-1) : (W-padR)/2;
-  const y=v=> padT+(base-padT)*(1-(v-r.lo)/span);
+  const y=sc.y;
   let svg='<svg class="spark" viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" '+
     'role="img" aria-label="'+esc(metric.label)+' by region">';
   svg+='<line x1="0" y1="'+base+'" x2="'+W+'" y2="'+base+'" stroke="var(--hair-strong)" stroke-width="1"/>';
-  /* No labels on the lines - five of them collide and detach from their line.
-     The values sit in a strip underneath instead, next to their colour. */
+  /* Labels sit on their points, and any that would collide is dropped rather
+     than stacked - the strip underneath always carries the current value. */
+  const placed=[];
   seriesList.forEach(function(sr){
     const pts=[];
     sr.values.forEach((v,i)=>{ if(v!=null) pts.push([x(i),y(v),i,v]); });
@@ -1164,8 +1171,16 @@ function sparkMulti(seriesList, metric, labels){
     if(pts.length>1)
       svg+='<path d="'+pts.map((p,k)=>(k?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ")+
            '" fill="none" stroke="'+sr.color+'" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" opacity=".9"/>';
-    const last=pts[pts.length-1];
-    svg+='<circle cx="'+last[0].toFixed(1)+'" cy="'+last[1].toFixed(1)+'" r="2.6" fill="'+sr.color+'"/>';
+    pts.forEach(function(p,k){
+      const isLast=k===pts.length-1;
+      svg+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(isLast?2.8:1.9)+'" fill="'+sr.color+'"/>';
+      const ly=p[1]-6;
+      if(ly<9) return;
+      if(placed.some(q=>Math.abs(q[0]-p[0])<34 && Math.abs(q[1]-ly)<9)) return;
+      placed.push([p[0],ly]);
+      svg+='<text x="'+p[0].toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle" font-size="9" '+
+           'font-weight="600" fill="'+sr.color+'">'+fmt(metric,p[3])+'</text>';
+    });
   });
   labels.forEach((lab,i)=>{
     svg+='<text x="'+x(i).toFixed(1)+'" y="'+(H-5)+'" text-anchor="middle" font-size="10" fill="var(--muted)">'+esc(lab)+'</text>';
@@ -1178,6 +1193,23 @@ function sparkMulti(seriesList, metric, labels){
       '<b class="num">'+fmt(metric,t.cur)+'</b></span>';
   }).join("");
   return svg+'<div class="rvals">'+strip+'</div>';
+}
+/* One place that decides how values map to pixels, so cards and the trend
+   chart agree. Log needs every value above zero, so it quietly stays linear
+   when a series contains a zero or a blank. */
+function makeScale(metric, vals, padT, base){
+  const useLog = state.scale==="log" && vals.length && Math.min.apply(null,vals)>0;
+  if(useLog){
+    const t=v=>Math.log10(v);
+    let lo=t(Math.min.apply(null,vals)), hi=t(Math.max.apply(null,vals));
+    if(hi-lo<0.08){ const m=(hi+lo)/2; lo=m-0.08; hi=m+0.08; }
+    else { const p=(hi-lo)*0.10; lo-=p; hi+=p; }
+    const span=hi-lo;
+    return { log:true, y:v=>padT+(base-padT)*(1-(t(v)-lo)/span), at:u=>Math.pow(10,lo+span*u) };
+  }
+  const r=niceRange(metric, Math.min.apply(null,vals), Math.max.apply(null,vals));
+  const span=(r.hi-r.lo)||1;
+  return { log:false, y:v=>padT+(base-padT)*(1-(v-r.lo)/span), at:u=>r.lo+span*u };
 }
 function niceRange(metric, min, max){
   let lo=min, hi=max;
@@ -1207,11 +1239,10 @@ function sparkline(series,metric,labels){
   /* Percentages get at least 2pp of visible range, other metrics at least 8%
      of their own level. Without a floor, a 0.1pp wobble fills the whole card
      and reads as a collapse. A dead-flat series lands mid-height. */
-  const r=niceRange(metric, Math.min(...vals), Math.max(...vals));
-  const span=(r.hi-r.lo)||1;
   const n=series.length, base=H-padB;
+  const sc=makeScale(metric, vals, padT, base);
   const x=i=> n>1 ? padX+i*(W-padX*2)/(n-1) : W/2;
-  const y=v=> padT+(base-padT)*(1-(v-r.lo)/span);
+  const y=sc.y;
   const pts=idx.map(i=>[x(i),y(series[i]),i]);
   const tones=pts.map((p,k)=> k===0 ? null : stepTone(metric,series[pts[k-1][2]],series[p[2]]));
   let svg='<svg class="spark" viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" role="img" aria-label="'+
@@ -1243,16 +1274,14 @@ function lineChart(seriesList, labels, metric, colorMode){
   const all=[]; seriesList.forEach(s=>s.values.forEach(v=>{ if(v!=null) all.push(v); }));
   if(!all.length) return '<div class="state"><h3>No numbers here yet</h3><p>Nothing in this sheet matches the current filters. Widen the region or segment filter.</p></div>';
   const W=1000,H=430,L=62,R=26,T=34,B=42;
-  const rng=niceRange(metric, Math.min(...all), Math.max(...all));
-  let min=rng.lo, max=rng.hi;
-  if(max-min<0.001){ max=min+1; }
   const n=labels.length;
+  const sc=makeScale(metric, all, T, H-B);
   const x=i=>L+(n>1?(i*(W-L-R)/(n-1)):(W-L-R)/2);
-  const y=v=>T+(H-T-B)*(1-(v-min)/(max-min));
+  const y=sc.y;
   let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="430" role="img" aria-label="Trend chart">';
   const ticks=5;
   for(let i=0;i<=ticks;i++){
-    const v=min+(max-min)*i/ticks, yy=y(v);
+    const v=sc.at(i/ticks), yy=y(v);
     svg+='<line x1="'+L+'" y1="'+yy.toFixed(1)+'" x2="'+(W-R)+'" y2="'+yy.toFixed(1)+'" stroke="var(--hair)" stroke-width="1"'+(i?' stroke-dasharray="3 4"':'')+'/>';
     svg+='<text x="'+(L-10)+'" y="'+(yy+4).toFixed(1)+'" text-anchor="end" font-size="11" fill="var(--muted)">'+
          (metric.kind==="pct"?v.toFixed(1):(v>=100?Math.round(v):v.toFixed(1)))+'</text>';
@@ -1415,7 +1444,8 @@ function controlsHTML(){
        (state.costError ? '<span class="note" style="max-width:46ch;color:var(--down)">'+
           esc(state.costError.slice(0,160))+'</span>' : '')+'</div>' : '')+
     (regs.length?'<div class="ctl"><span>Regions</span><div class="chips">'+
-      regs.map(r=>'<button class="chip" data-region="'+esc(r)+'" aria-pressed="'+regSet().has(r)+'">'+esc(r)+'</button>').join("")+
+      regs.map(r=>'<button class="chip chip-r" data-region="'+esc(r)+'" aria-pressed="'+regSet().has(r)+
+        '"><span class="swatch" style="background:'+regionColor(r)+'"></span>'+esc(r)+'</button>').join("")+
       '</div><button class="linky" id="regAll">'+(regSet().size===regs.length?"Clear all":"Select all")+'</button></div>':'')+
   '</div>';
 }
@@ -1426,7 +1456,10 @@ function glanceHTML(){
   const latest=periods.length?periods[periods.length-1]:"";
   let html='<div class="sec"><h2>At a glance</h2><span class="note">'+
     esc(periodName(latest))+' \u00b7 '+esc(segLabel)+' \u00b7 change is against the period before it</span>'+
-    '<div class="sec-tools"><span class="note">Cards</span>'+
+    '<div class="sec-tools"><span class="note">Scale</span><div class="seg">'+
+      [["linear","Linear"],["log","Log"]].map(o=>'<button data-scale="'+o[0]+'" aria-pressed="'+
+        (o[0]===state.scale)+'">'+o[1]+'</button>').join("")+'</div>'+
+    '<span class="note" style="margin-left:6px">Cards</span>'+
       metricsOf().map(x=>'<button class="chip chip-sm" data-card="'+x.id+'" aria-pressed="'+
         (!state.hiddenCards.has(x.id))+'">'+esc(x.label)+'</button>').join("")+
     '</div></div><div class="lanes">';
@@ -1435,10 +1468,6 @@ function glanceHTML(){
     html+='<section class="lane"><div class="lane-hd"><h3><span class="swatch" style="background:'+lane.color+'"></span>'+
       esc(lane.label)+'</h3><span class="sub">'+esc(lane.blurb)+
       (lane.id==="region"?' \u00b7 '+activeRegions().length+' of '+allRegions().length:'')+'</span></div>'+
-      (lane.id==="region" ? '<div class="rlegend">'+allRegions().map(r=>
-         '<button class="rchip" data-region="'+esc(r)+'" aria-pressed="'+regSet().has(r)+
-         '"><span class="swatch" style="background:'+regionColor(r)+'"></span>'+esc(r)+'</button>').join("")+
-       '</div>' : '')+
       '<div class="cards">';
     metricsOf().filter(m=>!state.hiddenCards.has(m.id)).forEach(m=>{
       const series=metricSeries(lane.id,m);
@@ -1673,7 +1702,28 @@ function healthHTML(){
     ? state.access.length+' people in '+ACCESS_FILE+' \u00b7 '+
       state.access.filter(a=>a.role==="admin").length+' admin'
     : 'No '+ACCESS_FILE+' found \u2014 any '+ALLOWED_DOMAINS.join(" / ")+' address can sign in';
-  return '<div class="sec"><h2>Data health<span class="admin-tag">Admin</span></h2>'+
+  let costDims="";
+  if(state.cost){
+    const seen={};
+    state.cost.forEach(function(r){
+      const k="seg:"+r.segment; seen[k]=seen[k]||{v:r.segment,kind:"segment",to:costSegmentOf(r.segment)};
+      const g="reg:"+r.region;  seen[g]=seen[g]||{v:r.region,kind:"region",
+        to:(allRegions().indexOf(r.region)>=0?r.region:null)};
+    });
+    const rows=Object.keys(seen).map(k=>seen[k]).map(function(d){
+      return '<tr><td style="text-align:left">'+esc(d.kind)+'</td>'+
+        '<td style="text-align:left">'+esc(d.v==null?"(blank)":d.v)+'</td>'+
+        '<td style="text-align:left'+(d.to?'':';color:var(--down);font-weight:600')+'">'+
+        (d.to?esc(d.to):"not mapped \u2014 excluded from that filter")+'</td></tr>';
+    }).join("");
+    costDims='<div class="sec"><h2>Cost dimensions<span class="admin-tag">Admin</span></h2>'+
+      '<span class="note">What BigQuery returned, and how each value maps onto the filters. '+
+      'Anything unmapped goes in segmentMap in config.json.</span></div>'+
+      '<div class="panel"><div class="scroll"><table class="records">'+
+      '<tr><th style="text-align:left">Field</th><th style="text-align:left">Value from BigQuery</th>'+
+      '<th style="text-align:left">Maps to</th></tr><tbody>'+rows+'</tbody></table></div></div>';
+  }
+  return costDims+'<div class="sec"><h2>Data health<span class="admin-tag">Admin</span></h2>'+
     '<span class="note">What each sheet returned on the last sync. Blanks are missing metric cells, not zeros.</span></div>'+
     '<div class="panel" style="margin-bottom:18px"><div class="panel-hd" style="margin:0">'+
       '<h3>Access</h3><span class="note">'+esc(acc)+'</span></div></div>'+
@@ -1732,6 +1782,7 @@ function wire(){
     state.cost=await loadCost();
     render();
   };
+  document.querySelectorAll("[data-scale]").forEach(b=>b.onclick=()=>{ state.scale=b.dataset.scale; render(); });
   document.querySelectorAll("[data-card]").forEach(b=>b.onclick=()=>{
     const id=b.dataset.card;
     if(state.hiddenCards.has(id)) state.hiddenCards.delete(id); else state.hiddenCards.add(id);
