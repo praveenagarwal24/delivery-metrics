@@ -1127,20 +1127,40 @@ function stepTone(metric,prev,cur){
   return (metric.better==="high" ? d>0 : d<0) ? "up" : "down";
 }
 function toneColor(t){ return t==="up"?"var(--up)":t==="down"?"var(--down)":"var(--flat)"; }
+/* Keep small movements looking small. */
+function niceRange(metric, min, max){
+  let lo=min, hi=max;
+  const level=Math.abs((min+max)/2)||1;
+  const floor = metric.kind==="pct" ? 2 : level*0.08;
+  /* Nothing moved at all: centre it, and skip the ceiling clamp so a flat 100%
+     doesn't pin to the top and fill the card with one solid block. */
+  if(max===min) return { lo:min-floor/2, hi:min+floor/2 };
+  if(hi-lo < floor){
+    const mid=(hi+lo)/2;
+    lo=mid-floor/2; hi=mid+floor/2;
+  } else {
+    const pad=(hi-lo)*0.12; lo-=pad; hi+=pad;
+  }
+  if(metric.kind==="pct"){
+    if(hi>100){ const over=hi-100; hi-=over; lo-=over; }
+    if(lo<0){ hi-=lo; lo=0; }
+  } else if(lo<0) { hi-=lo; lo=0; }
+  return {lo:lo, hi:hi};
+}
 
 function sparkline(series,metric,labels){
   const idx=[]; series.forEach((v,i)=>{ if(v!=null) idx.push(i); });
   if(idx.length<2) return '<div class="spark" style="height:120px"></div>';
   const W=240,H=124,padT=20,padB=20,padX=22;
   const vals=idx.map(i=>series[i]);
-  const min=Math.min(...vals),max=Math.max(...vals);
-  const flat=(max-min)===0;            // every value identical
-  const span=(max-min)||1;
+  /* Percentages get at least 2pp of visible range, other metrics at least 8%
+     of their own level. Without a floor, a 0.1pp wobble fills the whole card
+     and reads as a collapse. A dead-flat series lands mid-height. */
+  const r=niceRange(metric, Math.min(...vals), Math.max(...vals));
+  const span=(r.hi-r.lo)||1;
   const n=series.length, base=H-padB;
   const x=i=> n>1 ? padX+i*(W-padX*2)/(n-1) : W/2;
-  /* A flat series would otherwise sit on the baseline with nothing to fill,
-     so park it mid-height instead. */
-  const y=v=> flat ? padT+(base-padT)*0.45 : padT+(base-padT)*(1-(v-min)/span);
+  const y=v=> padT+(base-padT)*(1-(v-r.lo)/span);
   const pts=idx.map(i=>[x(i),y(series[i]),i]);
   const tones=pts.map((p,k)=> k===0 ? null : stepTone(metric,series[pts[k-1][2]],series[p[2]]));
   let svg='<svg class="spark" viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" role="img" aria-label="'+
@@ -1172,9 +1192,8 @@ function lineChart(seriesList, labels, metric, colorMode){
   const all=[]; seriesList.forEach(s=>s.values.forEach(v=>{ if(v!=null) all.push(v); }));
   if(!all.length) return '<div class="state"><h3>No numbers here yet</h3><p>Nothing in this sheet matches the current filters. Widen the region or segment filter.</p></div>';
   const W=1000,H=430,L=62,R=26,T=34,B=42;
-  let min=Math.min(...all),max=Math.max(...all);
-  if(metric.kind==="pct"){ min=Math.max(0,min-(max-min)*0.25-0.5); max=Math.min(100.5,max+(max-min)*0.15+0.5); }
-  else { min=Math.max(0,min-(max-min)*0.2); max=max+(max-min)*0.15+0.5; }
+  const rng=niceRange(metric, Math.min(...all), Math.max(...all));
+  let min=rng.lo, max=rng.hi;
   if(max-min<0.001){ max=min+1; }
   const n=labels.length;
   const x=i=>L+(n>1?(i*(W-L-R)/(n-1)):(W-L-R)/2);
