@@ -1093,6 +1093,7 @@ function fmt(metric,v){
 }
 function fmtDelta(metric,cur,prev){
   if(cur==null||prev==null) return null;
+  if(sameDisplay(metric,cur,prev)) return { txt:"no change", tone:"flat" };
   const d=cur-prev;
   const sign=d>=0?"+":"\u2212", a=Math.abs(d);
   const txt = metric.kind==="pct" ? sign+a.toFixed(1)+" pp"
@@ -1100,8 +1101,7 @@ function fmtDelta(metric,cur,prev){
       ? sign+fmt(metric,a).replace("\u20b9","\u20b9")
       : sign+(a>=100?Math.round(a):a.toFixed(1))+"h";
   const good = metric.better==="high" ? d>0 : d<0;
-  const tone = Math.abs(d)<0.05 ? "flat" : (good?"up":"down");
-  return { txt, tone };
+  return { txt, tone: good?"up":"down" };
 }
 function periodName(p){
   const map={ "MTD":"Month to date","M-1":"Last month","M-2":"2 months back","M-3":"3 months back","M-4":"4 months back",
@@ -1113,8 +1113,15 @@ function esc(s){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;"
 /* ---------- svg charts ---------- */
 /* Every line is coloured step by step: each leg is judged only against the
    point before it, green when the move is good for that metric, red when not. */
+/* Two values that print the same are treated as unchanged. Otherwise a card can
+   read 100.0% -> 100.0% and still colour the leg red, which just looks broken. */
+function sameDisplay(metric,a,b){
+  if(a==null||b==null||isNaN(a)||isNaN(b)) return false;
+  return fmt(metric,a)===fmt(metric,b);
+}
 function stepTone(metric,prev,cur){
   if(prev==null||cur==null||isNaN(prev)||isNaN(cur)) return "flat";
+  if(sameDisplay(metric,prev,cur)) return "flat";
   const d=cur-prev;
   if(Math.abs(d)<0.0005) return "flat";
   return (metric.better==="high" ? d>0 : d<0) ? "up" : "down";
