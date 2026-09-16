@@ -247,9 +247,9 @@ function mkMetrics(lastId,lastLabel){
     { id:"p99_tat_hrs", label:"TAT (P99)", kind:"hrs", better:"low"  },
     { id:"p95_tat_hrs", label:"TAT (P95)", kind:"hrs", better:"low"  },
     { id:lastId,        label:lastLabel,   kind:"pct", better:"high" },
-    { id:"cost",           label:"QC cost",      kind:"inr",  better:"low",  agg:"sum",   src:"bq" },
-    { id:"cost_per_image", label:"Cost / image", kind:"inr2", better:"low",  agg:"ratio", src:"bq" },
-    { id:"images",         label:"Volume",       kind:"int",  better:"high", agg:"sum",   src:"bq" }
+    /* Cost per image only. Total cost and volume are still queried - the ratio
+       needs both - but neither is offered as a card or chart of its own. */
+    { id:"cost_per_image", label:"Cost / image", kind:"inr2", better:"low",  agg:"ratio", src:"bq" }
   ];
 }
 
