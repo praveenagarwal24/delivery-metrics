@@ -3,6 +3,7 @@
     { "email": "praveen@spyne.ai", "role": "admin" },
     { "email": "kishor@spyne.ai", "role": "viewer" },
     { "email": "nitin.kumar@spyne.ai", "role": "viewer" },
-    { "email": "ranbir.manoranjan@spyne.ai", "role": "viewer" }
+    { "email": "ranbir.manoranjan@spyne.ai", "role": "viewer" },
+    { "email": "anuj@spyne.ai", "role": "viewer" }
   ]
 }
