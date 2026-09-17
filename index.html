@@ -32,7 +32,7 @@ select{font:inherit;color:inherit}
 
 /* ---------- masthead ---------- */
 .mast{background:var(--deep);color:#E7EFEE;position:sticky;top:0;z-index:40;
-  transition:padding .16s ease,box-shadow .16s ease}
+  transition:box-shadow .16s ease}
 .mast.compact{box-shadow:0 6px 18px rgba(12,46,44,.22)}
 .mast.compact .mast-in{padding-top:11px}
 .mast.compact h1{font-size:17px}
@@ -84,14 +84,15 @@ select.inp{background:var(--panel);border:1px solid var(--hair-strong);border-ra
 .sec .note{font-size:12.5px;color:var(--muted)}
 
 /* ---------- glance grid ---------- */
-.lanes{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
-.lane{background:var(--panel-sunk);border:1px solid var(--hair);border-radius:var(--r-panel);padding:14px}
-.lane-hd{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:2px 4px 12px}
+.lanes{display:grid;grid-template-columns:repeat(var(--lanes,3),minmax(0,1fr));gap:14px 18px;align-items:stretch}
+.lane-hd{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 2px 2px;align-self:end}
 .lane-hd h3{margin:0;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
 .swatch{width:9px;height:9px;border-radius:2px;display:inline-block}
 .lane-hd .sub{font-size:12px;color:var(--muted)}
 .cards{display:grid;gap:10px}
-.card{background:var(--panel);border:1px solid var(--hair);border-radius:var(--r-card);padding:12px 14px 8px}
+.card{background:var(--panel);border:1px solid var(--hair);border-radius:var(--r-card);padding:12px 14px 8px;
+  display:flex;flex-direction:column;height:100%}
+.card .spark{margin-top:auto}
 .card-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .card-top .name{font-size:13px;font-weight:600;color:var(--ink-2)}
 .val{font-size:23px;font-weight:600;letter-spacing:-.02em}
@@ -192,7 +193,8 @@ tbody tr[aria-selected="true"]{background:var(--teal-soft);box-shadow:inset 2px 
 .rsn-track i{display:block;height:100%;border-radius:3px}
 .foot{margin-top:34px;padding-top:16px;border-top:1px solid var(--hair-strong);font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 18px}
 .foot a{color:var(--teal)}
-@media (max-width:1080px){.lanes{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
+@media (max-width:1080px){.grid2{grid-template-columns:1fr}
+  .lanes{grid-template-columns:repeat(var(--lanes,3),minmax(250px,1fr));overflow-x:auto;padding-bottom:6px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -1147,7 +1149,7 @@ function regionColor(r){
 function sparkMulti(seriesList, metric, labels){
   const all=[]; seriesList.forEach(s=>s.values.forEach(v=>{ if(v!=null) all.push(v); }));
   if(all.length<2) return '<div class="spark" style="height:120px"></div>';
-  const W=240,H=112,padT=12,padB=19,padL=12,padR=12;
+  const W=240,H=124,padT=20,padB=20,padL=14,padR=14;
   const base=H-padB, n=labels.length;
   const sc=makeScale(metric, all, padT, base);
   const x=i=> n>1 ? padL+i*(W-padL-padR)/(n-1) : (W-padR)/2;
@@ -1168,11 +1170,14 @@ function sparkMulti(seriesList, metric, labels){
         const cx=x(i)-slot/2+bw*si+bw/2, yy=y(v), h=Math.max(1, base-yy);
         svg+='<rect x="'+(cx-bw/2+0.4).toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+Math.max(1,bw-0.8).toFixed(1)+
              '" height="'+h.toFixed(1)+'" rx="1.2" fill="'+sr.color+'" opacity=".85"/>';
-        const ly=yy-4;
-        if(ly>=9 && !placed.some(q=>Math.abs(q[0]-cx)<30 && Math.abs(q[1]-ly)<9)){
+        /* Five bars per period leaves no room for horizontal text, so the
+           values are set upright alongside their bar. */
+        const ly=yy-3;
+        if(ly>=26 && !placed.some(q=>Math.abs(q[0]-cx)<6)){
           placed.push([cx,ly]);
-          svg+='<text x="'+cx.toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle" font-size="8.5" '+
-               'font-weight="600" fill="'+sr.color+'">'+fmt(metric,v)+'</text>';
+          svg+='<text transform="translate('+cx.toFixed(1)+','+ly.toFixed(1)+') rotate(-90)" '+
+               'text-anchor="start" font-size="7.5" font-weight="600" fill="'+sr.color+'">'+
+               fmt(metric,v)+'</text>';
         }
       });
     });
@@ -1191,11 +1196,11 @@ function sparkMulti(seriesList, metric, labels){
     pts.forEach(function(p,k){
       const isLast=k===pts.length-1;
       svg+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(isLast?2.8:1.9)+'" fill="'+sr.color+'"/>';
-      const ly=p[1]-6;
+      const ly=p[1]-5;
       if(ly<9) return;
-      if(placed.some(q=>Math.abs(q[0]-p[0])<34 && Math.abs(q[1]-ly)<9)) return;
+      if(placed.some(q=>Math.abs(q[0]-p[0])<30 && Math.abs(q[1]-ly)<8)) return;
       placed.push([p[0],ly]);
-      svg+='<text x="'+p[0].toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle" font-size="9" '+
+      svg+='<text x="'+p[0].toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle" font-size="8" '+
            'font-weight="600" fill="'+sr.color+'">'+fmt(metric,p[3])+'</text>';
     });
   });
@@ -1393,9 +1398,12 @@ function heatStyle(metric,v,min,max){
 /* ============================================================
    RENDER
    ============================================================ */
+let stickyH=0;
 function syncSticky(){
   const m=document.querySelector(".mast");
-  if(m) document.documentElement.style.setProperty("--mastH", m.offsetHeight+"px");
+  if(!m) return;
+  const h=m.offsetHeight;
+  if(h!==stickyH){ stickyH=h; document.documentElement.style.setProperty("--mastH", h+"px"); }
 }
 function render(){
   renderTabs();
@@ -1503,6 +1511,8 @@ function glanceHTML(){
   const segLabel=(SEGMENTS.find(s=>s.id===state.segment)||SEGMENTS[0]).label.toLowerCase();
   const periods=periodsOf();
   const latest=periods.length?periods[periods.length-1]:"";
+  const lanes=lanesOf(), ms=metricsOf().filter(m=>!state.hiddenCards.has(m.id));
+
   let html='<div class="sec"><h2>At a glance</h2><span class="note">'+
     esc(periodName(latest))+' \u00b7 '+esc(segLabel)+' \u00b7 change is against the period before it</span>'+
     '<div class="sec-tools"><span class="note">Chart</span><div class="seg">'+
@@ -1514,14 +1524,18 @@ function glanceHTML(){
     '<span class="note" style="margin-left:6px">Cards</span>'+
       metricsOf().map(x=>'<button class="chip chip-sm" data-card="'+x.id+'" aria-pressed="'+
         (!state.hiddenCards.has(x.id))+'">'+esc(x.label)+'</button>').join("")+
-    '</div></div><div class="lanes">';
+    '</div></div>';
 
-  lanesOf().forEach(lane=>{
-    html+='<section class="lane"><div class="lane-hd"><h3><span class="swatch" style="background:'+lane.color+'"></span>'+
+  /* A single grid, filled row by row, so card N of every lane shares a row and
+     therefore a height. Separate per-lane columns could never guarantee that. */
+  html+='<div class="lanes" style="--lanes:'+lanes.length+'">';
+  lanes.forEach(function(lane){
+    html+='<div class="lane-hd"><h3><span class="swatch" style="background:'+lane.color+'"></span>'+
       esc(lane.label)+'</h3><span class="sub">'+esc(lane.blurb)+
-      (lane.id==="region"?' \u00b7 '+activeRegions().length+' of '+allRegions().length:'')+'</span></div>'+
-      '<div class="cards">';
-    metricsOf().filter(m=>!state.hiddenCards.has(m.id)).forEach(m=>{
+      (lane.id==="region"?' \u00b7 '+activeRegions().length+' of '+allRegions().length:'')+'</span></div>';
+  });
+  ms.forEach(function(m){
+    lanes.forEach(function(lane){
       const series=metricSeries(lane.id,m);
       const t=lastTwo(series), d=fmtDelta(m,t.cur,t.prev);
       const perRegion = lane.id==="region"
@@ -1538,10 +1552,9 @@ function glanceHTML(){
         '<div class="val num">'+fmt(m,t.cur)+'</div>'+
         '<div class="cmp num">'+(t.prev!=null?"was "+fmt(m,t.prev):"no prior period")+'</div>'+
         (perRegion && perRegion.length
-           ? sparkMulti(perRegion,m,periodsOf())
-           : sparkline(series,m,periodsOf()))+'</article>';
+           ? sparkMulti(perRegion,m,periods)
+           : sparkline(series,m,periods))+'</article>';
     });
-    html+='</div></section>';
   });
   return html+'</div>';
 }
@@ -1920,11 +1933,21 @@ function downloadCSV(){
 
 document.getElementById("refreshBtn").onclick=loadAll;
 /* The masthead condenses once you scroll so the frozen bar stays slim. */
+/* Collapsing the header shortens the page, which can scroll you back above the
+   trigger and expand it again - hence the gap between the two thresholds. */
+let mastCompact=false, stickyQueued=false;
 window.addEventListener("scroll",function(){
+  const y=window.scrollY;
+  if(!mastCompact && y>90) mastCompact=true;
+  else if(mastCompact && y<30) mastCompact=false;
+  else return;
   const m=document.querySelector(".mast");
   if(!m) return;
-  const want=window.scrollY>56;
-  if(want!==m.classList.contains("compact")){ m.classList.toggle("compact",want); syncSticky(); }
+  m.classList.toggle("compact",mastCompact);
+  if(!stickyQueued){
+    stickyQueued=true;
+    requestAnimationFrame(function(){ stickyQueued=false; syncSticky(); });
+  }
 },{passive:true});
 window.addEventListener("resize",syncSticky);
 syncSticky();
