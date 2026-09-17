@@ -1148,8 +1148,8 @@ function regionColor(r){
 /* One line per region on the region card, coloured to match the chips. */
 function sparkMulti(seriesList, metric, labels){
   const all=[]; seriesList.forEach(s=>s.values.forEach(v=>{ if(v!=null) all.push(v); }));
-  if(all.length<2) return '<div class="spark" style="height:120px"></div>';
-  const W=240,H=124,padT=20,padB=20,padL=14,padR=14;
+  if(all.length<2) return '<div class="spark" style="height:136px"></div>';
+  const W=268,H=140,padT=30,padB=20,padL=12,padR=12;
   const base=H-padB, n=labels.length;
   const sc=makeScale(metric, all, padT, base);
   const x=i=> n>1 ? padL+i*(W-padL-padR)/(n-1) : (W-padR)/2;
@@ -1162,22 +1162,26 @@ function sparkMulti(seriesList, metric, labels){
   const placed=[];
   if(state.chart==="bar"){
     const m=seriesList.length||1;
-    const slot=(n>1 ? (W-padL-padR)/(n-1) : (W-padL-padR)) * 0.78;
+    const slot=(n>1 ? (W-padL-padR)/(n-1) : (W-padL-padR)) * 0.86;
     const bw=Math.max(1.6, slot/m);
+    const fs=Math.max(5.6, Math.min(7.6, bw*0.8));      // label must fit the bar's width
     seriesList.forEach(function(sr,si){
       sr.values.forEach(function(v,i){
         if(v==null) return;
         const cx=x(i)-slot/2+bw*si+bw/2, yy=y(v), h=Math.max(1, base-yy);
-        svg+='<rect x="'+(cx-bw/2+0.4).toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+Math.max(1,bw-0.8).toFixed(1)+
-             '" height="'+h.toFixed(1)+'" rx="1.2" fill="'+sr.color+'" opacity=".85"/>';
-        /* Five bars per period leaves no room for horizontal text, so the
-           values are set upright alongside their bar. */
-        const ly=yy-3;
-        if(ly>=26 && !placed.some(q=>Math.abs(q[0]-cx)<6)){
-          placed.push([cx,ly]);
-          svg+='<text transform="translate('+cx.toFixed(1)+','+ly.toFixed(1)+') rotate(-90)" '+
-               'text-anchor="start" font-size="7.5" font-weight="600" fill="'+sr.color+'">'+
-               fmt(metric,v)+'</text>';
+        svg+='<rect x="'+(cx-bw/2+0.35).toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+Math.max(1,bw-0.7).toFixed(1)+
+             '" height="'+h.toFixed(1)+'" rx="1.2" fill="'+sr.color+'" opacity=".88"/>';
+        /* Upright beside the bar, or tucked inside it when the bar reaches the
+           top. Every bar keeps its value either way. */
+        const txt=fmt(metric,v), len=txt.length*fs*0.62;
+        if(yy-3-len >= 1){
+          svg+='<text transform="translate('+cx.toFixed(1)+','+(yy-3).toFixed(1)+') rotate(-90)" '+
+               'text-anchor="start" font-size="'+fs.toFixed(1)+'" font-weight="600" fill="'+sr.color+'">'+
+               txt+'</text>';
+        } else if(h > len+4){
+          svg+='<text transform="translate('+cx.toFixed(1)+','+(yy+3).toFixed(1)+') rotate(-90)" '+
+               'text-anchor="end" font-size="'+fs.toFixed(1)+'" font-weight="600" fill="#fff">'+
+               txt+'</text>';
         }
       });
     });
@@ -1198,7 +1202,7 @@ function sparkMulti(seriesList, metric, labels){
       svg+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(isLast?2.8:1.9)+'" fill="'+sr.color+'"/>';
       const ly=p[1]-5;
       if(ly<9) return;
-      if(placed.some(q=>Math.abs(q[0]-p[0])<30 && Math.abs(q[1]-ly)<8)) return;
+      if(placed.some(q=>Math.abs(q[0]-p[0])<26 && Math.abs(q[1]-ly)<7)) return;
       placed.push([p[0],ly]);
       svg+='<text x="'+p[0].toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle" font-size="8" '+
            'font-weight="600" fill="'+sr.color+'">'+fmt(metric,p[3])+'</text>';
@@ -1248,8 +1252,8 @@ function niceRange(metric, min, max){
 
 function sparkline(series,metric,labels){
   const idx=[]; series.forEach((v,i)=>{ if(v!=null) idx.push(i); });
-  if(idx.length<2) return '<div class="spark" style="height:120px"></div>';
-  const W=240,H=124,padT=20,padB=20,padX=22;
+  if(idx.length<2) return '<div class="spark" style="height:136px"></div>';
+  const W=268,H=140,padT=22,padB=20,padX=24;
   const vals=idx.map(i=>series[i]);
   /* Percentages get at least 2pp of visible range, other metrics at least 8%
      of their own level. Without a floor, a 0.1pp wobble fills the whole card
