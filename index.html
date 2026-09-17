@@ -1151,8 +1151,24 @@ function sparkMulti(seriesList, metric, labels){
   if(all.length<2) return '<div class="spark" style="height:136px"></div>';
   const W=268,H=140,padT=30,padB=20,padL=12,padR=12;
   const base=H-padB, n=labels.length;
-  const sc=makeScale(metric, all, padT, base);
-  const x=i=> n>1 ? padL+i*(W-padL-padR)/(n-1) : (W-padR)/2;
+  let padTop=padT, bar=null;
+  if(state.chart==="bar"){
+    const m=seriesList.length||1;
+    /* Bars sit in per-period slots, not on the line positions - centring a
+       group on x(0) hangs half of it off the left edge. */
+    const slot=((W-padL-padR)/n) * 0.8;
+    const bw=Math.max(1.3, slot/m);
+    const fs=Math.max(4.8, Math.min(6.4, bw*0.95));
+    /* Labels always sit above their bar, so the plot has to start low enough
+       that even a full-height bar leaves room for one. */
+    const longest=Math.max.apply(null, all.map(v=>fmt(metric,v).length));
+    padTop=Math.min(H*0.46, 7+longest*fs*0.62);
+    bar={m:m, slot:slot, bw:bw, fs:fs};
+  }
+  const sc=makeScale(metric, all, padTop, base);
+  const inner=W-padL-padR;
+  const x=i=> bar ? padL+inner*(i+0.5)/n
+                  : (n>1 ? padL+i*inner/(n-1) : padL+inner/2);
   const y=sc.y;
   let svg='<svg class="spark" viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" '+
     'role="img" aria-label="'+esc(metric.label)+' by region">';
@@ -1160,29 +1176,17 @@ function sparkMulti(seriesList, metric, labels){
   /* Labels sit on their points, and any that would collide is dropped rather
      than stacked - the strip underneath always carries the current value. */
   const placed=[];
-  if(state.chart==="bar"){
-    const m=seriesList.length||1;
-    const slot=(n>1 ? (W-padL-padR)/(n-1) : (W-padL-padR)) * 0.86;
-    const bw=Math.max(1.6, slot/m);
-    const fs=Math.max(5.6, Math.min(7.6, bw*0.8));      // label must fit the bar's width
+  if(bar){
     seriesList.forEach(function(sr,si){
       sr.values.forEach(function(v,i){
         if(v==null) return;
-        const cx=x(i)-slot/2+bw*si+bw/2, yy=y(v), h=Math.max(1, base-yy);
-        svg+='<rect x="'+(cx-bw/2+0.35).toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+Math.max(1,bw-0.7).toFixed(1)+
-             '" height="'+h.toFixed(1)+'" rx="1.2" fill="'+sr.color+'" opacity=".88"/>';
-        /* Upright beside the bar, or tucked inside it when the bar reaches the
-           top. Every bar keeps its value either way. */
-        const txt=fmt(metric,v), len=txt.length*fs*0.62;
-        if(yy-3-len >= 1){
-          svg+='<text transform="translate('+cx.toFixed(1)+','+(yy-3).toFixed(1)+') rotate(-90)" '+
-               'text-anchor="start" font-size="'+fs.toFixed(1)+'" font-weight="600" fill="'+sr.color+'">'+
-               txt+'</text>';
-        } else if(h > len+4){
-          svg+='<text transform="translate('+cx.toFixed(1)+','+(yy+3).toFixed(1)+') rotate(-90)" '+
-               'text-anchor="end" font-size="'+fs.toFixed(1)+'" font-weight="600" fill="#fff">'+
-               txt+'</text>';
-        }
+        const cx=x(i)-bar.slot/2+bar.bw*si+bar.bw/2, yy=y(v), h=Math.max(1, base-yy);
+        svg+='<rect x="'+(cx-bar.bw/2+0.45).toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+
+             Math.max(0.9,bar.bw-0.9).toFixed(1)+'" height="'+h.toFixed(1)+
+             '" rx="1" fill="'+sr.color+'" opacity=".9"/>';
+        svg+='<text transform="translate('+cx.toFixed(1)+','+(yy-2.5).toFixed(1)+') rotate(-90)" '+
+             'text-anchor="start" font-size="'+bar.fs.toFixed(1)+'" font-weight="600" fill="'+
+             sr.color+'">'+fmt(metric,v)+'</text>';
       });
     });
     labels.forEach((lab,i)=>{
@@ -1309,7 +1313,9 @@ function lineChart(seriesList, labels, metric, colorMode){
   const W=1000,H=430,L=62,R=26,T=34,B=42;
   const n=labels.length;
   const sc=makeScale(metric, all, T, H-B);
-  const x=i=>L+(n>1?(i*(W-L-R)/(n-1)):(W-L-R)/2);
+  const inner=W-L-R, bars=state.chart==="bar";
+  const x=i=> bars ? L+inner*(i+0.5)/n
+                   : L+(n>1 ? i*inner/(n-1) : inner/2);
   const y=sc.y;
   let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="430" role="img" aria-label="Trend chart">';
   const ticks=5;
@@ -1326,9 +1332,9 @@ function lineChart(seriesList, labels, metric, colorMode){
        (metric.kind==="pct"?"%":"hours")+'</text>';
   const placed=[];
   const byMove = colorMode==="movement";
-  if(state.chart==="bar"){
+  if(bars){
     const m=seriesList.length||1;
-    const slot=(n>1 ? (W-L-R)/(n-1) : (W-L-R)) * 0.74;
+    const slot=(inner/n) * 0.8;
     const bw=Math.max(2, slot/m);
     seriesList.forEach(function(sr,si){
       const color=sr.color||SERIES_COLORS[si%SERIES_COLORS.length];
