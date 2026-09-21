@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Delivery Metrics — Images</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"> 
+<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;450;500;600;700&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -280,10 +280,10 @@ function mkMetrics(lastId,lastLabel,costLabel,slaHrs){
     { id:"sla_pct",     label:"SLA < "+(slaHrs||6)+" hrs", kind:"pct", better:"high" },
     { id:"p99_tat_hrs", label:"TAT (P99)", kind:"hrs", better:"low"  },
     { id:"p95_tat_hrs", label:"TAT (P95)", kind:"hrs", better:"low"  },
+    { id:lastId,        label:lastLabel,   kind:"pct", better:"high" },
     /* Cost per unit only. Total cost and volume are still queried - the ratio
        needs both - but neither is offered as a card or chart of its own. */
-    { id:"cost_per_image", label:costLabel||"Cost / image", kind:"inr2", better:"low", agg:"ratio", src:"bq" },
-    { id:lastId,        label:lastLabel,   kind:"pct", better:"high" }
+    { id:"cost_per_image", label:costLabel||"Cost / image", kind:"inr2", better:"low", agg:"ratio", src:"bq" }
   ];
 }
 
@@ -392,7 +392,7 @@ const state = {
   drillRegion:null, recordsLane:"vin", recordsQuery:"", hidden:new Set(),
   sortCol:null, sortDir:-1,
   data:{}, loading:false, error:null, synced:null, user:null, access:null, denied:false, loginLog:null,
-  cost:null, costError:null, extra:null
+  cost:null, costError:null, costLatest:null, extra:null
 };
 function isAdmin(){ return !!(state.user && state.user.admin); }
 /* Sheets are cached per product, so 360's rooftop rows never overwrite images'. */
@@ -657,6 +657,10 @@ async function loadAll(){
     state.extra=await loadExtra(prod);
     state.costError=null;
     state.cost=await loadCost();
+    state.costLatest=null;
+    if(state.cost) state.cost.forEach(function(r){
+      if(r.latest && (!state.costLatest || r.latest>state.costLatest)) state.costLatest=r.latest;
+    });
     state.synced=new Date();
     if(isAdmin() && LOGIN_LOG && LOGIN_LOG.sheetName){
       try{ state.loginLog=await loadLoginLog(); }catch(e){ state.loginLog=null; }
@@ -839,12 +843,12 @@ priced AS (
 bucketed AS (
   SELECT 'month' AS period_type,
          DATE_DIFF(DATE_TRUNC(CURRENT_DATE(),MONTH), DATE_TRUNC(work_date,MONTH), MONTH) AS idx,
-         product, region, segment, images, cost, unpriced_images
+         work_date, product, region, segment, images, cost, unpriced_images
   FROM priced
   UNION ALL
   SELECT 'week',
          DATE_DIFF(DATE_TRUNC(CURRENT_DATE(),WEEK(MONDAY)), DATE_TRUNC(work_date,WEEK(MONDAY)), WEEK) + ${wOff},
-         product, region, segment, images, cost, unpriced_images
+         work_date, product, region, segment, images, cost, unpriced_images
   FROM priced
 )
 SELECT period_type,
@@ -854,7 +858,8 @@ SELECT period_type,
        product, region, segment,
        ROUND(SUM(cost),2) AS cost,
        SUM(images) AS images,
-       SUM(unpriced_images) AS unpriced_images
+       SUM(unpriced_images) AS unpriced_images,
+       MAX(work_date) AS latest
 FROM bucketed
 WHERE (period_type='month' AND idx BETWEEN 0 AND 5)
    OR (period_type='week'  AND idx BETWEEN 1 AND 4)
@@ -1531,7 +1536,10 @@ function glanceHTML(){
   const lanes=lanesOf(), ms=metricsOf().filter(m=>!state.hiddenCards.has(m.id));
 
   let html='<div class="sec"><h2>At a glance</h2><span class="note">'+
-    esc(periodName(latest))+' \u00b7 '+esc(segLabel)+' \u00b7 change is against the period before it</span>'+
+    esc(periodName(latest))+' \u00b7 '+esc(segLabel)+' \u00b7 change is against the period before it'+
+    (state.costLatest ? ' \u00b7 <b style="color:var(--warn)">cost data only to '+
+       esc(new Date(state.costLatest+"T00:00:00").toLocaleDateString("en-IN",{day:"numeric",month:"short"}))+
+       '</b>' : '')+'</span>'+
     '<div class="sec-tools"><span class="note">Chart</span><div class="seg">'+
       [["line","Line"],["bar","Bar"]].map(o=>'<button data-chart="'+o[0]+'" aria-pressed="'+
         (o[0]===state.chart)+'">'+o[1]+'</button>').join("")+'</div>'+
