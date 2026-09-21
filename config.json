@@ -49,6 +49,7 @@
       "smb": [
         "SMB"
       ]
-    }
+    },
+    "weekOffset": 0
   }
 }
