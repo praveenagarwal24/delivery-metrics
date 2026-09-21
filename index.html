@@ -760,6 +760,9 @@ function costSql(){
     .map(d=>"LOWER(TRIM(QC)) LIKE '%@"+d+"'").join(" OR ");
   const assumed=COST.assumedMonthlySalary==null?25000:COST.assumedMonthlySalary;
   const months=COST.months||8;
+  /* weekOffset shifts which real week gets called W-1. 0 means W-1 is the last
+     complete week; set it to 1 if your sheets call the week in progress W-1. */
+  const wOff=COST.weekOffset==null?0:COST.weekOffset;
   return `
 WITH work AS (
   SELECT LOWER(TRIM(QC)) AS qc_email,
@@ -840,7 +843,7 @@ bucketed AS (
   FROM priced
   UNION ALL
   SELECT 'week',
-         DATE_DIFF(DATE_TRUNC(CURRENT_DATE(),WEEK(MONDAY)), DATE_TRUNC(work_date,WEEK(MONDAY)), WEEK),
+         DATE_DIFF(DATE_TRUNC(CURRENT_DATE(),WEEK(MONDAY)), DATE_TRUNC(work_date,WEEK(MONDAY)), WEEK) + ${wOff},
          product, region, segment, images, cost, unpriced_images
   FROM priced
 )
@@ -853,7 +856,8 @@ SELECT period_type,
        SUM(images) AS images,
        SUM(unpriced_images) AS unpriced_images
 FROM bucketed
-WHERE (period_type='month' AND idx <= 5) OR (period_type='week' AND idx <= 5)
+WHERE (period_type='month' AND idx BETWEEN 0 AND 5)
+   OR (period_type='week'  AND idx BETWEEN 1 AND 4)
 GROUP BY period_type, period, product, region, segment`;
 }
 
@@ -1011,13 +1015,16 @@ function activeRegions(){
   return sel.length?sel:all;
 }
 function col(metricId){ return (SEGMENTS.find(s=>s.id===state.segment)||SEGMENTS[0]).prefix+metricId; }
+/* The weekly report runs W-1 (last complete week) to W-4. W-0, the week in
+   progress, is dropped wherever it turns up. */
+function isShownPeriod(p){ return String(p).trim().toUpperCase()!=="W-0"; }
 function periodsOf(){
   const ls=lanesOf(), a=ls[0]?rowsFor(ls[0].id):[], b=ls[1]?rowsFor(ls[1].id):[];
   const src=a.length?a:b;
   const out=[],seen=new Set();
-  src.forEach(r=>{ if(!seen.has(r.period)){ seen.add(r.period); out.push(r.period); }});
+  src.forEach(r=>{ if(!seen.has(r.period) && isShownPeriod(r.period)){ seen.add(r.period); out.push(r.period); }});
   if(out.length) return out;
-  const set=new Set(); rowsFor("region").forEach(r=>set.add(r.period));
+  const set=new Set(); rowsFor("region").forEach(r=>{ if(isShownPeriod(r.period)) set.add(r.period); });
   return [...set];
 }
 /* region lane: mean across the regions in play, per period */
@@ -1791,7 +1798,38 @@ function healthHTML(){
         '<td style="text-align:left'+(d.to?'':';color:var(--down);font-weight:600')+'">'+
         (d.to?esc(d.to):"not mapped \u2014 excluded from that filter")+'</td></tr>';
     }).join("");
-    costDims='<div class="sec"><h2>Cost dimensions<span class="admin-tag">Admin</span></h2>'+
+    /* Which periods the cost query actually covers, before any filter is
+       applied - so a gap on a card can be traced to missing rows vs a filter. */
+    const cover={};
+    state.cost.forEach(function(r){
+      if(!costProductMatch(r.product)) return;
+      const k=r.period_type+"|"+r.period;
+      const c=cover[k]||(cover[k]={pt:r.period_type,p:r.period,rows:0,images:0,cost:0,segs:{}});
+      c.rows++; c.images+=Number(r.images)||0; c.cost+=Number(r.cost)||0;
+      const sg=costSegmentOf(r.segment)||"unmapped";
+      c.segs[sg]=(c.segs[sg]||0)+1;
+    });
+    const onScreen=periodsOf();
+    const covRows=Object.keys(cover).map(k=>cover[k])
+      .filter(c=>c.pt===state.granularity && isShownPeriod(c.p))
+      .sort((a,b)=>onScreen.indexOf(a.p)-onScreen.indexOf(b.p))
+      .map(function(c){
+        const missing=onScreen.indexOf(c.p)<0;
+        return '<tr><td style="text-align:left">'+esc(c.p)+(missing?' <span style="color:var(--muted)">(not on screen)</span>':'')+
+          '</td><td class="num">'+c.rows+'</td><td class="num">'+c.images.toLocaleString("en-IN")+
+          '</td><td class="num">'+fmt({kind:"inr"},c.cost)+'</td>'+
+          '<td style="text-align:left;color:var(--muted)">'+esc(Object.keys(c.segs).sort().join(", "))+'</td></tr>';
+      }).join("");
+    const absent=onScreen.filter(p=>!cover[state.granularity+"|"+p]);
+    costDims='<div class="sec"><h2>Cost coverage<span class="admin-tag">Admin</span></h2>'+
+      '<span class="note">'+esc(state.product)+' \u00b7 '+esc(state.granularity)+'ly, before segment and region filters'+
+      (absent.length?' \u00b7 nothing returned for '+esc(absent.join(", ")):'')+'</span></div>'+
+      '<div class="panel" style="margin-bottom:18px"><div class="scroll"><table class="records">'+
+      '<tr><th style="text-align:left">Period</th><th>Rows</th><th>Images</th><th>Cost</th>'+
+      '<th style="text-align:left">Segments present</th></tr><tbody>'+
+      (covRows||'<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:22px">No cost rows for this product</td></tr>')+
+      '</tbody></table></div></div>'+
+      '<div class="sec"><h2>Cost dimensions<span class="admin-tag">Admin</span></h2>'+
       '<span class="note">What BigQuery returned, and how each value maps onto the filters. '+
       'Anything unmapped goes in segmentMap in config.json.</span></div>'+
       '<div class="panel"><div class="scroll"><table class="records">'+
