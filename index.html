@@ -1459,14 +1459,13 @@ function render(){
     return;
   }
 
-  /* Admin-only blocks live on this branch - add future add-ons here. */
+  /* The page ends after the fixed panels. Trend, drill-down and the admin
+     blocks are still built by the functions below - add them back to this list
+     to restore them. */
   main.innerHTML =
     controlsHTML() +
     glanceHTML() +
     extraHTML() +
-    trendHTML() +
-    matrixHTML() +
-    (isAdmin() ? healthHTML() + recordsHTML() + loginLogHTML() : "") +
     footHTML();
   wire();
   syncSticky();
