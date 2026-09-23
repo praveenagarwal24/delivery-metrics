@@ -297,33 +297,14 @@ const PRODUCTS = [
       { id:"region", label:"Region",  sheet:"images_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
   { id:"spin", label:"360", status:"live", metrics:mkMetrics("delivery_pct","Fulfilment","Cost / spin",6),
-    /* Fixed panels, independent of every filter. Swap "rows" for "sheet" once
-       the tabs exist and the same renderer reads them from the workbook.      */
+    /* All three read 360_issue and split on its category column. */
     panels:[
-      { title:"QC Failed reasons", subtitle:"Blocker severity issues", tone:"red",
-        rate:0.023, total:357, rows:[
-          {label:"Warping",            count:144, pct:0.0091},
-          {label:"Placement",          count:77,  pct:0.0049},
-          {label:"CompleteCar - RBG",  count:38,  pct:0.0024},
-          {label:"Exposure",           count:28,  pct:0.0018},
-          {label:"RoofRail - RBG",     count:23,  pct:0.0015}
-        ]},
-      { title:"Validation Failed reasons", subtitle:"Failure reasons", tone:"red",
-        rate:0.116, total:1834, rows:[
-          {label:"Spin frames must be greater than or equal to 6", count:800, pct:0.0507},
-          {label:"Incomplete Round",   count:474, pct:0.0300},
-          {label:"Bad Input",          count:256, pct:0.0162},
-          {label:"Less Then Five Image",count:91, pct:0.0058},
-          {label:"Extra sticker / banner", count:57, pct:0.0036}
-        ]},
-      { title:"Tech & AI Failure reasons", subtitle:"Failure reasons", tone:"amber",
-        rate:0.014, total:221, rows:[
-          {label:"crop_video pipeline failed",       count:76, pct:0.0048},
-          {label:"Create Payload Function error",    count:38, pct:0.0024},
-          {label:"Frame Extraction Failed",          count:27, pct:0.0017},
-          {label:"Not enough images left after filtering for cropped", count:18, pct:0.0011},
-          {label:"Colmap/Warping Failed",            count:11, pct:0.0007}
-        ]}
+      { sheet:"360_issue", cat:"QC Failed", title:"QC Failed reasons",
+        subtitle:"Blocker severity issues", tone:"red", kind:"reasons", pctWhole:true },
+      { sheet:"360_issue", cat:"Validation Failed", title:"Validation Failed reasons",
+        subtitle:"Failure reasons", tone:"red", kind:"reasons", pctWhole:true },
+      { sheet:"360_issue", cat:"Tech & AI Failure", title:"Tech & AI Failure reasons",
+        subtitle:"Failure reasons", tone:"amber", kind:"reasons", pctWhole:true }
     ],
     lanes:[
       { id:"spin",   label:"Spin",    sheet:"360_spin",   color:"var(--s1)", blurb:"Every spin delivered" },
@@ -937,7 +918,12 @@ function costSeries(laneId, metric, prefix, regionsOverride){
 async function loadExtra(prod){
   if(!prod || !prod.panels) return null;
   const out={};
-  await Promise.all(prod.panels.filter(p=>p.sheet).map(async function(p){
+  const seen={};
+  const unique=prod.panels.filter(function(p){
+    if(!p.sheet || seen[p.sheet]) return false;
+    seen[p.sheet]=true; return true;
+  });
+  await Promise.all(unique.map(async function(p){
     try{
       const t=await fetchTable(p.sheet);
       const labels=t.cols.map(c=>String(c.label||"").trim());
@@ -961,8 +947,9 @@ async function loadExtra(prod){
       const byName=re=>low.findIndex(l=>re.test(l));
       const pti=byName(/^period_type$|^granularity$/);
       const pei=byName(/^period$/);
+      const cti=byName(/^category$|^type$|^group$/);
       let li=byName(/reason|issue|label|bucket/);
-      if(li<0) li=labels.findIndex((l,i)=>!num(i) && i!==pti && i!==pei);
+      if(li<0) li=labels.findIndex((l,i)=>!num(i) && i!==pti && i!==pei && i!==cti);
       const pi=labels.findIndex((l,i)=>num(i)&&/^%$|pct|percent|share|rate/i.test(l));
       const ci=labels.findIndex((l,i)=>num(i)&&i!==pi);
       out[p.sheet]=t.rows.map(function(r){
@@ -971,8 +958,11 @@ async function loadExtra(prod){
         /* pctWhole means the sheet already stores 1.58 for 1.58%. Guessing from
            magnitude breaks below 1, where 0.28 would read as 28%. */
         if(pct!=null) pct = p.pctWhole ? pct/100 : (pct>1 ? pct/100 : pct);
+        let lab=g(li)==null?"":String(g(li)).trim();
+        if(!lab || lab.toLowerCase()==="null") lab="Unspecified";
         return { pt:normGran(g(pti)), p:g(pei)==null?null:String(g(pei)).trim(),
-                 label:String(g(li)==null?"":g(li)), count:Number(g(ci))||0, pct:pct };
+                 cat:g(cti)==null?null:String(g(cti)).trim(),
+                 label:lab, count:Number(g(ci))||0, pct:pct };
       }).filter(x=>x.label);
     }catch(e){ out[p.sheet]=null; }
   }));
@@ -1008,6 +998,10 @@ function extraHTML(){
         '</tbody></table></div></section>';
     }
 
+    if(p.kind==="reasons" && Array.isArray(rows) && p.cat){
+      const want=normKey(p.cat);
+      rows=rows.filter(r=>normKey(r.cat)===want);
+    }
     /* Reasons follow the period filter when the sheet carries those columns. */
     if(p.kind==="reasons" && Array.isArray(rows) && rows.some(r=>r.p)){
       rows=rows.filter(r=>(!r.pt||r.pt===state.granularity) && r.p===latestPeriod);
@@ -1048,7 +1042,7 @@ function extraHTML(){
   const shown=cards.split("<section").length-1;
   if(!cards.replace(/\s/g,"")) return "";
   const isLog=prod.panels.every(p=>p.kind==="log");
-  return '<div class="sec"><h2>'+(isLog?"Delivery incidents":"Failure reasons")+'</h2>'+
+  return '<div class="sec"><h2>'+(isLog?"Delivery incidents":"Fulfilment Gap Reasons")+'</h2>'+
     '<span class="note">'+(filtered
       ? esc(periodName(latestPeriod||""))+' \u00b7 follows the period filter'
       : 'Fixed \u2014 not affected by the filters above')+'</span></div>'+
