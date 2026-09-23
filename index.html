@@ -329,9 +329,12 @@ const PRODUCTS = [
       { id:"rt",     label:"Rooftop", sheet:"360_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
       { id:"region", label:"Region",  sheet:"360_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
-  { id:"video", label:"Video", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / video",8),
-    panels:[{ sheet:"video_ff", title:"Fulfilment failure reasons",
-              subtitle:"Failure reasons", tone:"red" }],
+  { id:"video", label:"Video", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / video",6),
+    panels:[
+      { sheet:"video_ff",  title:"Fulfilment failure reasons", subtitle:"Failure reasons",
+        tone:"red", kind:"reasons", pctWhole:true },
+      { sheet:"video_sla", title:"SLA incidents", kind:"table" }
+    ],
     lanes:[
       { id:"vin",    label:"VIN",     sheet:"video_vin",    color:"var(--s1)", blurb:"Every vehicle delivered" },
       { id:"rt",     label:"Rooftop", sheet:"video_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
@@ -937,6 +940,12 @@ async function loadExtra(prod){
     try{
       const t=await fetchTable(p.sheet);
       const labels=t.cols.map(c=>String(c.label||"").trim());
+      if(p.kind==="table"){
+        out[p.sheet]={ cols:labels, types:t.cols.map(c=>c.type),
+          rows:t.rows.map(r=>labels.map((l,i)=>(r.c&&r.c[i]&&r.c[i].v!=null)?r.c[i].v:null))
+                     .filter(r=>r.some(v=>v!=null&&v!=="")) };
+        return;
+      }
       if(p.kind==="log"){
         const di=t.cols.findIndex(c=>c.type==="date"||c.type==="datetime");
         const strs=t.cols.map((c,i)=>i).filter(i=>i!==di && labels[i]!=="");
@@ -946,15 +955,23 @@ async function loadExtra(prod){
         }).filter(x=>x.text).sort((a,b)=>(a.at&&b.at)?b.at-a.at:0);
         return;
       }
+      const low=labels.map(l=>l.toLowerCase());
       const num=i=>t.rows.some(r=>r.c&&r.c[i]&&typeof r.c[i].v==="number");
-      const li=labels.findIndex((l,i)=>!num(i));
+      const byName=re=>low.findIndex(l=>re.test(l));
+      const pti=byName(/^period_type$|^granularity$/);
+      const pei=byName(/^period$/);
+      let li=byName(/reason|issue|label|bucket/);
+      if(li<0) li=labels.findIndex((l,i)=>!num(i) && i!==pti && i!==pei);
       const pi=labels.findIndex((l,i)=>num(i)&&/^%$|pct|percent|share|rate/i.test(l));
       const ci=labels.findIndex((l,i)=>num(i)&&i!==pi);
       out[p.sheet]=t.rows.map(function(r){
         const g=i=> (i>=0&&r.c&&r.c[i]&&r.c[i].v!=null) ? r.c[i].v : null;
-        const pct=g(pi);
-        return { label:String(g(li)==null?"":g(li)), count:Number(g(ci))||0,
-                 pct: pct==null?null:(pct>1?pct/100:pct) };
+        let pct=g(pi);
+        /* pctWhole means the sheet already stores 1.58 for 1.58%. Guessing from
+           magnitude breaks below 1, where 0.28 would read as 28%. */
+        if(pct!=null) pct = p.pctWhole ? pct/100 : (pct>1 ? pct/100 : pct);
+        return { pt:normGran(g(pti)), p:g(pei)==null?null:String(g(pei)).trim(),
+                 label:String(g(li)==null?"":g(li)), count:Number(g(ci))||0, pct:pct };
       }).filter(x=>x.label);
     }catch(e){ out[p.sheet]=null; }
   }));
@@ -964,9 +981,41 @@ function extraHTML(){
   const prod=PRODUCTS.find(p=>p.id===state.product);
   if(!prod || !prod.panels) return "";
   const pct=v=>(v==null?"\u2014":(v*100).toFixed(2)+"%");
+  const periodsNow=periodsOf();
+  const latestPeriod=periodsNow.length?periodsNow[periodsNow.length-1]:null;
+  let filtered=false;
   const cards=prod.panels.map(function(p){
-    const rows = p.rows || (state.extra && state.extra[p.sheet]) || null;
-    if(!rows || !rows.length) return "";
+    let rows = p.rows || (state.extra && state.extra[p.sheet]) || null;
+    if(!rows) return "";
+
+    if(p.kind==="table"){
+      const cols=rows.cols||[], data=rows.rows||[];
+      if(!data.length) return "";
+      const cell=function(v){
+        if(v==null||v==="") return "\u2014";
+        if(typeof v==="string" && /^Date\(/.test(v)){
+          const d=toDate(v);
+          return d?esc(d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})):esc(v);
+        }
+        return typeof v==="number" ? v.toLocaleString("en-IN") : esc(v);
+      };
+      return '<section class="rcard ev-card"><div class="rcard-hd"><h3>'+esc(p.title)+'</h3>'+
+        '<span class="rcard-rate" style="font-size:13px;color:var(--muted)">'+data.length+' logged</span></div>'+
+        '<div class="scroll" style="max-height:none;border:0"><table class="records"><tr>'+
+        cols.map(c=>'<th style="text-align:left">'+esc(c)+'</th>').join("")+'</tr><tbody>'+
+        data.map(r=>'<tr>'+r.map(v=>'<td style="text-align:left">'+cell(v)+'</td>').join("")+'</tr>').join("")+
+        '</tbody></table></div></section>';
+    }
+
+    /* Reasons follow the period filter when the sheet carries those columns. */
+    if(p.kind==="reasons" && Array.isArray(rows) && rows.some(r=>r.p)){
+      rows=rows.filter(r=>(!r.pt||r.pt===state.granularity) && r.p===latestPeriod);
+      filtered=true;
+      if(!rows.length) return '<section class="rcard"><div class="rcard-hd"><h3>'+esc(p.title)+'</h3></div>'+
+        '<p style="margin:10px 0 14px;font-size:13px;color:var(--muted)">Nothing recorded for '+
+        esc(latestPeriod||"this period")+'.</p></section>';
+    }
+    if(!rows.length) return "";
     if(p.kind==="log"){
       const items=rows.map(function(r){
         return '<li class="ev"><div class="ev-when num">'+
@@ -998,7 +1047,9 @@ function extraHTML(){
   if(!cards.replace(/\s/g,"")) return "";
   const isLog=prod.panels.every(p=>p.kind==="log");
   return '<div class="sec"><h2>'+(isLog?"Delivery incidents":"Failure reasons")+'</h2>'+
-    '<span class="note">Fixed \u2014 not affected by the filters above</span></div>'+
+    '<span class="note">'+(filtered
+      ? esc(periodName(latestPeriod||""))+' \u00b7 follows the period filter'
+      : 'Fixed \u2014 not affected by the filters above')+'</span></div>'+
     '<div class="rgrid">'+cards+'</div>';
 }
 
@@ -1051,17 +1102,18 @@ function regionSeries(colName, regionFilter){
 function segPrefix(){ return (SEGMENTS.find(s=>s.id===state.segment)||SEGMENTS[0]).prefix; }
 /* Combine one column across the periods in view. Rates average across regions,
    totals add up - averaging a cost would understate it badly. */
-function aggSeries(laneId, colName, mode, regionsOverride){
+function aggSeries(laneId, colName, mode, regionsOverride, skipZero){
+  const gone=v=>(v==null||isNaN(v)||(skipZero&&v===0));
   if(laneId!=="region"){
     const map=new Map(rowsFor(laneId).map(r=>[r.period, r.v[colName]]));
-    return periodsOf().map(p=>{ const v=map.get(p); return (v==null||isNaN(v))?null:v; });
+    return periodsOf().map(p=>{ const v=map.get(p); return gone(v)?null:v; });
   }
   const keep=regionsOverride||activeRegions();
   const byPeriod=new Map();
   rowsFor("region").forEach(r=>{
     if(keep.indexOf(r.region)<0) return;
     const v=r.v[colName];
-    if(v==null||isNaN(v)) return;
+    if(gone(v)) return;
     if(!byPeriod.has(r.period)) byPeriod.set(r.period,[]);
     byPeriod.get(r.period).push(v);
   });
@@ -1080,7 +1132,10 @@ function metricSeries(laneId, metric, prefix, regionsOverride){
     const d=aggSeries(laneId, px+metric.den, "sum", regionsOverride);
     return n.map((v,i)=> (v==null||d[i]==null||!d[i]) ? null : v/d[i]);
   }
-  return aggSeries(laneId, px+metric.id, metric.agg||"mean", regionsOverride);
+  /* A 0% SLA or 0h TAT is a region that did no work that period, not a real
+     reading - averaging it in drags the roll-up down to nothing. */
+  const skipZero = metric.kind==="pct" || metric.kind==="hrs";
+  return aggSeries(laneId, px+metric.id, metric.agg||"mean", regionsOverride, skipZero);
 }
 function valueAt(row, metric, prefix){
   const px = prefix!=null ? prefix : segPrefix();
