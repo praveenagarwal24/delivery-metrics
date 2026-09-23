@@ -166,8 +166,9 @@ tbody tr[aria-selected="true"]{background:var(--teal-soft);box-shadow:inset 2px 
   border-radius:var(--r-pill);padding:3px 9px;font-size:11.5px;color:var(--ink-2);line-height:1}
 .rchip[aria-pressed="false"]{opacity:.42}
 .rchip[aria-pressed="false"] .swatch{background:var(--flat)!important}
-.rgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:18px}
-.ev-card{grid-column:1/-1}
+.rgrid{display:grid;grid-template-columns:repeat(var(--cols,3),minmax(0,1fr));gap:18px;align-items:stretch}
+.rcard{display:flex;flex-direction:column}
+@media (max-width:900px){.rgrid{grid-template-columns:1fr}}
 .evs{list-style:none;margin:0;padding:0;max-height:340px;overflow-y:auto}
 .ev{display:flex;gap:16px;padding:11px 0;border-top:1px solid var(--hair)}
 .ev:first-child{border-top:0}
@@ -1044,13 +1045,14 @@ function extraHTML(){
       '<span>of reviewed \u00b7 '+total.toLocaleString("en-IN")+'</span></div>'+
       '<ul class="rsns">'+body+'</ul></section>';
   }).join("");
+  const shown=cards.split("<section").length-1;
   if(!cards.replace(/\s/g,"")) return "";
   const isLog=prod.panels.every(p=>p.kind==="log");
   return '<div class="sec"><h2>'+(isLog?"Delivery incidents":"Failure reasons")+'</h2>'+
     '<span class="note">'+(filtered
       ? esc(periodName(latestPeriod||""))+' \u00b7 follows the period filter'
       : 'Fixed \u2014 not affected by the filters above')+'</span></div>'+
-    '<div class="rgrid">'+cards+'</div>';
+    '<div class="rgrid" style="--cols:'+Math.max(1,shown)+'">'+cards+'</div>';
 }
 
 /* ---------- selectors ---------- */
