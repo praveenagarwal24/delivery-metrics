@@ -168,6 +168,11 @@ tbody tr[aria-selected="true"]{background:var(--teal-soft);box-shadow:inset 2px 
 .rchip[aria-pressed="false"] .swatch{background:var(--flat)!important}
 .rgrid{display:grid;grid-template-columns:repeat(var(--cols,3),minmax(0,1fr));gap:18px;align-items:stretch}
 .rcard{display:flex;flex-direction:column}
+.progs{list-style:none;margin:10px 0 4px;padding:0}
+.progs li{padding:9px 0;border-top:1px solid var(--hair);font-size:13px;color:var(--ink-2);line-height:1.45}
+.progs li:first-child{border-top:0}
+.progs li::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;
+  background:var(--teal);margin-right:9px;vertical-align:2px}
 @media (max-width:900px){.rgrid{grid-template-columns:1fr}}
 .evs{list-style:none;margin:0;padding:0;max-height:340px;overflow-y:auto}
 .ev{display:flex;gap:16px;padding:11px 0;border-top:1px solid var(--hair)}
@@ -259,6 +264,10 @@ let   ADMINS           = ["praveen@spyne.ai"];     // always admin, whatever acc
    If the file is missing, the dashboard falls back to letting any
    ALLOWED_DOMAINS address in — so nothing breaks before you create it.        */
 const ACCESS_FILE      = "access.json";
+/* One tab holds the programme list for every product; column A maps the row to
+   a product tab. Add spellings here if the sheet starts using new ones. */
+const PROGRAMS_SHEET   = "programs";
+const PROGRAM_PRODUCTS = { images:["image","images"], spin:["360","360 spin","spin"], video:["video"] };
 let   ACCESS_CONTACT   = "praveen@spyne.ai";       // where access requests are sent
 /* Sign-in logging. A Google Form is the write endpoint - the page posts each
    sign-in to it and the responses land in a tab of the workbook, which the
@@ -377,7 +386,7 @@ const state = {
   drillRegion:null, recordsLane:"vin", recordsQuery:"", hidden:new Set(),
   sortCol:null, sortDir:-1,
   data:{}, loading:false, error:null, synced:null, user:null, access:null, denied:false, loginLog:null,
-  cost:null, costError:null, costLatest:null, extra:null
+  cost:null, costError:null, costLatest:null, extra:null, programs:null
 };
 function isAdmin(){ return !!(state.user && state.user.admin); }
 /* Sheets are cached per product, so 360's rooftop rows never overwrite images'. */
@@ -640,6 +649,7 @@ async function loadAll(){
       state.regionsInit[state.product]=true;
     }
     state.extra=await loadExtra(prod);
+    state.programs=await loadPrograms();
     state.costError=null;
     state.cost=await loadCost();
     state.costLatest=null;
@@ -1047,6 +1057,41 @@ function extraHTML(){
       ? esc(periodName(latestPeriod||""))+' \u00b7 follows the period filter'
       : 'Fixed \u2014 not affected by the filters above')+'</span></div>'+
     '<div class="rgrid" style="--cols:'+Math.max(1,shown)+'">'+cards+'</div>';
+}
+
+/* Programme list, shared across products and split on its product column. */
+async function loadPrograms(){
+  try{
+    const t=await fetchTable(PROGRAMS_SHEET);
+    const low=t.cols.map(c=>String(c.label||"").trim().toLowerCase());
+    const find=(re,fallback)=>{ const i=low.findIndex(l=>re.test(l)); return i<0?fallback:i; };
+    const pi=find(/^product$/,0), bi=find(/^bucket$|^area$|^theme$/,1), ni=find(/^programs?$|^name$|^item$/,2);
+    return t.rows.map(function(r){
+      const g=i=> (i>=0&&r.c&&r.c[i]&&r.c[i].v!=null) ? String(r.c[i].v).trim() : "";
+      return { product:g(pi), bucket:g(bi)||"Other", name:g(ni) };
+    }).filter(x=>x.name);
+  }catch(e){ return null; }
+}
+function programsHTML(){
+  const all=state.programs;
+  if(!all || !all.length) return "";
+  const want=(PROGRAM_PRODUCTS[state.product]||[]).map(normKey);
+  const mine=all.filter(p=>want.indexOf(normKey(p.product))>=0);
+  if(!mine.length) return "";
+  const buckets=[];
+  mine.forEach(function(p){
+    let b=buckets.find(x=>normKey(x.name)===normKey(p.bucket));
+    if(!b){ b={name:p.bucket, items:[]}; buckets.push(b); }
+    b.items.push(p.name);
+  });
+  const cards=buckets.map(function(b){
+    return '<section class="rcard"><div class="rcard-hd"><h3>'+esc(b.name)+'</h3>'+
+      '<span class="rcard-rate" style="font-size:13px;color:var(--muted)">'+b.items.length+'</span></div>'+
+      '<ul class="progs">'+b.items.map(i=>'<li>'+esc(i)+'</li>').join("")+'</ul></section>';
+  }).join("");
+  return '<div class="sec"><h2>Programs</h2><span class="note">'+mine.length+
+    ' in flight \u00b7 from the '+esc(PROGRAMS_SHEET)+' tab</span></div>'+
+    '<div class="rgrid" style="--cols:'+buckets.length+'">'+cards+'</div>';
 }
 
 /* ---------- selectors ---------- */
@@ -1517,6 +1562,7 @@ function render(){
     controlsHTML() +
     glanceHTML() +
     extraHTML() +
+    programsHTML() +
     footHTML();
   wire();
   syncSticky();
