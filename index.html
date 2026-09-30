@@ -168,13 +168,13 @@ tbody tr[aria-selected="true"]{background:var(--teal-soft);box-shadow:inset 2px 
 .rchip[aria-pressed="false"] .swatch{background:var(--flat)!important}
 .rgrid{display:grid;grid-template-columns:repeat(var(--cols,3),minmax(0,1fr));gap:18px;align-items:stretch}
 .rcard{display:flex;flex-direction:column}
-.progs{list-style:none;margin:10px 0 4px;padding:0}
+.progs{list-style:none;margin:10px 0 4px;padding:0;max-height:none}
 .progs li{padding:9px 0;border-top:1px solid var(--hair);font-size:13px;color:var(--ink-2);line-height:1.45}
 .progs li:first-child{border-top:0}
 .progs li::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;
   background:var(--teal);margin-right:9px;vertical-align:2px}
 @media (max-width:900px){.rgrid{grid-template-columns:1fr}}
-.evs{list-style:none;margin:0;padding:0;max-height:340px;overflow-y:auto}
+.evs{list-style:none;margin:0;padding:0;max-height:none}
 .ev{display:flex;gap:16px;padding:11px 0;border-top:1px solid var(--hair)}
 .ev:first-child{border-top:0}
 .ev-when{flex:0 0 58px;font-size:12px;color:var(--muted);padding-top:2px}
@@ -189,6 +189,7 @@ tbody tr[aria-selected="true"]{background:var(--teal-soft);box-shadow:inset 2px 
 .rcard-sub{display:flex;justify-content:space-between;gap:12px;margin:3px 0 12px;
   font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
 .rsns{list-style:none;margin:0;padding:0;max-height:300px;overflow-y:auto}
+.rsns--all{max-height:none;overflow:visible}
 .rsn{padding:7px 0 9px;border-top:1px solid var(--hair)}
 .rsn:first-child{border-top:0}
 .rsn-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
@@ -325,7 +326,7 @@ const PRODUCTS = [
     quality:{ sheet:"video_qs", title:"Quality Chart" },
     panels:[
       { sheet:"video_ff",  title:"Fulfilment failure reasons", subtitle:"Failure reasons",
-        tone:"red", kind:"reasons", pctWhole:true },
+        tone:"red", kind:"reasons", pctWhole:true, noCap:true },
       { sheet:"video_sla", title:"SLA incidents", kind:"table" }
     ],
     lanes:[
@@ -1050,7 +1051,7 @@ function extraHTML(){
       '<h3>'+esc(p.title)+'</h3><span class="rcard-rate" style="color:'+tone+'">'+pct(rate)+'</span></div>'+
       '<div class="rcard-sub"><span>'+esc(p.subtitle||"")+' \u00b7 all reasons</span>'+
       '<span>of reviewed \u00b7 '+total.toLocaleString("en-IN")+'</span></div>'+
-      '<ul class="rsns">'+body+'</ul></section>';
+      '<ul class="rsns'+(p.noCap?" rsns--all":"")+'">'+body+'</ul></section>';
   }).join("");
   const shown=cards.split("<section").length-1;
   if(!cards.replace(/\s/g,"")) return "";
@@ -1069,6 +1070,7 @@ async function loadQuality(prod){
     const low=t.cols.map(c=>String(c.label||"").trim().toLowerCase());
     const at=re=>low.findIndex(l=>re.test(l));
     const i={ pt:at(/^period_type$|^granularity$/), p:at(/^period$/),
+              tot:at(/total/), del:at(/deliver/),
               rev:at(/review/), pass:at(/pass/), iss:at(/issue_count|^issues?$/),
               ipct:at(/issue_pct|issue_%/) };
     return t.rows.map(function(r){
@@ -1077,8 +1079,10 @@ async function loadQuality(prod){
       let ip=g("ipct");
       /* issue_pct is blank on some rows - derive it rather than drop the point. */
       if(ip==null && rev>0 && !isNaN(iss)) ip=(iss/rev)*100;
+      const nz=k=>{ const v=g(k); return v==null?null:Number(v); };
       return { pt:normGran(g("pt")), p:g("p")==null?null:String(g("p")).trim(),
-               reviewed:isNaN(rev)?null:rev, passed:Number(g("pass")),
+               total:nz("tot"), delivered:nz("del"),
+               reviewed:isNaN(rev)?null:rev, passed:nz("pass"),
                issues:isNaN(iss)?null:iss, issuePct:ip==null?null:Number(ip) };
     }).filter(x=>x.p);
   }catch(e){ return null; }
@@ -1127,6 +1131,19 @@ function qualityHTML(){
       '" width="'+(slot*0.6).toFixed(1)+'" height="'+Math.max(1,base-yc(r.passed)).toFixed(1)+
       '" rx="3" fill="var(--up)" opacity=".85" data-label="Passed" data-x="'+esc(lab)+
       '" data-v="'+esc((r.passed).toLocaleString("en-IN"))+'"></rect>';
+  });
+  rows.forEach(function(r,i){
+    if(!r) return;
+    const L=(k,v)=>v==null?null:'<span style="color:#9DB4B1">'+k+'</span> <b>'+v+'</b>';
+    const num=v=>v==null?null:Number(v).toLocaleString("en-IN");
+    const body=[ '<b>'+esc(periods[i])+'</b>',
+      L("Total videos", num(r.total)), L("Delivered", num(r.delivered)),
+      L("Reviewed", num(r.reviewed)), L("Passed", num(r.passed)),
+      L("Issues", num(r.issues)),
+      L("Issue rate", r.issuePct==null?null:r.issuePct.toFixed(1)+"%") ].filter(Boolean).join("<br>");
+    svg+='<rect class="pt" x="'+(padL+inner*i/n).toFixed(1)+'" y="'+padT+'" width="'+(inner/n).toFixed(1)+
+         '" height="'+(base-padT).toFixed(1)+'" fill="transparent" pointer-events="all" data-tip="'+
+         body.replace(/"/g,"&quot;")+'"></rect>';
   });
   const pts=[]; rows.forEach((r,i)=>{ if(r&&r.issuePct!=null) pts.push([x(i),yp(r.issuePct),i,r.issuePct,r]); });
   if(pts.length>1) svg+='<path d="'+pts.map((p,k)=>(k?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ")+
@@ -1383,17 +1400,29 @@ function sparkCombo(pctSeries, metric, labels, num, den){
   }
   labels.forEach(function(lab,i){
     const t=den[i], d=num[i];
-    /* Counts show on hover rather than on the chart - five labels per period
-       crowded the line out. class="pt" is what the tooltip binds to. */
-    if(t!=null) svg+='<rect class="pt" x="'+(x(i)-slot/2).toFixed(1)+'" y="'+yc(t).toFixed(1)+'" width="'+slot.toFixed(1)+
-      '" height="'+Math.max(0.6,base-yc(t)).toFixed(1)+'" rx="1.5" fill="var(--orange)" opacity=".85" '+
-      'data-label="'+esc((metric.combo&&metric.combo.denLabel)||"Total")+'" data-x="'+esc(lab)+
-      '" data-v="'+esc(Math.round(t).toLocaleString("en-IN"))+'"></rect>';
-    if(d!=null) svg+='<rect class="pt" x="'+(x(i)-slot/2+slot*0.22).toFixed(1)+'" y="'+yc(d).toFixed(1)+
-      '" width="'+(slot*0.56).toFixed(1)+'" height="'+Math.max(0.6,base-yc(d)).toFixed(1)+
-      '" rx="1.5" fill="var(--up)" opacity=".92" '+
-      'data-label="'+esc((metric.combo&&metric.combo.numLabel)||"Delivered")+'" data-x="'+esc(lab)+
-      '" data-v="'+esc(Math.round(d).toLocaleString("en-IN"))+'"></rect>';
+    /* One bar per period: delivered in green from the baseline, the shortfall
+       stacked on top in orange. Numbers live in the tooltip. */
+    const bx=(x(i)-slot/2).toFixed(1);
+    if(d!=null) svg+='<rect x="'+bx+'" y="'+yc(d).toFixed(1)+'" width="'+slot.toFixed(1)+
+      '" height="'+Math.max(0.6,base-yc(d)).toFixed(1)+'" fill="var(--up)" opacity=".9"/>';
+    if(t!=null && d!=null && t>d) svg+='<rect x="'+bx+'" y="'+yc(t).toFixed(1)+'" width="'+slot.toFixed(1)+
+      '" height="'+Math.max(0.6,yc(d)-yc(t)).toFixed(1)+'" rx="1.5" fill="var(--orange)" opacity=".9"/>';
+    else if(t!=null && d==null) svg+='<rect x="'+bx+'" y="'+yc(t).toFixed(1)+'" width="'+slot.toFixed(1)+
+      '" height="'+Math.max(0.6,base-yc(t)).toFixed(1)+'" rx="1.5" fill="var(--orange)" opacity=".9"/>';
+  });
+  labels.forEach(function(lab,i){
+    const t=den[i], d=num[i], p=pctSeries[i];
+    const nm=(metric.combo&&metric.combo.numLabel)||"Delivered";
+    const dn=(metric.combo&&metric.combo.denLabel)||"Total";
+    const line=(k,v)=>'<span style="color:#9DB4B1">'+k+'</span> <b>'+v+'</b>';
+    const body=[ '<b>'+esc(lab)+'</b>',
+      t!=null?line(dn, Math.round(t).toLocaleString("en-IN")):null,
+      d!=null?line(nm, Math.round(d).toLocaleString("en-IN")):null,
+      (t!=null&&d!=null)?line("Shortfall", Math.round(t-d).toLocaleString("en-IN")):null,
+      p!=null?line(esc(metric.label), fmt(metric,p)):null ].filter(Boolean).join("<br>");
+    svg+='<rect class="pt" x="'+(padL+inner*i/n).toFixed(1)+'" y="'+padT+'" width="'+(inner/n).toFixed(1)+
+         '" height="'+(base-padT).toFixed(1)+'" fill="transparent" pointer-events="all" data-tip="'+
+         body.replace(/"/g,"&quot;")+'"></rect>';
   });
   const pts=[]; pctSeries.forEach((v,i)=>{ if(v!=null) pts.push([x(i),yp(v),i,v]); });
   for(let k=1;k<pts.length;k++){
@@ -2219,7 +2248,8 @@ function wire(){
   const tip=document.getElementById("tip");
   document.querySelectorAll(".pt").forEach(c=>{
     c.addEventListener("mouseenter",e=>{
-      tip.innerHTML="<b>"+c.dataset.v+"</b> \u00b7 "+c.dataset.label+"<br>"+c.dataset.x;
+      tip.innerHTML = c.dataset.tip ? c.dataset.tip
+        : ("<b>"+c.dataset.v+"</b> \u00b7 "+c.dataset.label+"<br>"+c.dataset.x);
       tip.style.opacity="1";
     });
     c.addEventListener("mousemove",e=>{
