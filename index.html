@@ -285,12 +285,12 @@ const SHEET_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit"
    "sum" for totals, "ratio" for one total divided by another.
    needs lists the sheet columns required - a metric with a missing column is
    simply not offered, so cost appears on its own once the columns land.        */
-function mkMetrics(lastId,lastLabel,costLabel,slaHrs){
+function mkMetrics(lastId,lastLabel,costLabel,slaHrs,combo){
   return [
     { id:"sla_pct",     label:"SLA < "+(slaHrs||6)+" hrs", kind:"pct", better:"high" },
     { id:"p99_tat_hrs", label:"TAT (P99)", kind:"hrs", better:"low"  },
     { id:"p95_tat_hrs", label:"TAT (P95)", kind:"hrs", better:"low"  },
-    { id:lastId,        label:lastLabel,   kind:"pct", better:"high" },
+    { id:lastId,        label:lastLabel,   kind:"pct", better:"high", combo:combo||null },
     /* Cost per unit only. Total cost and volume are still queried - the ratio
        needs both - but neither is offered as a card or chart of its own. */
     { id:"cost_per_image", label:costLabel||"Cost / image", kind:"inr2", better:"low", agg:"ratio", src:"bq" }
@@ -320,7 +320,8 @@ const PRODUCTS = [
       { id:"rt",     label:"Rooftop", sheet:"360_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
       { id:"region", label:"Region",  sheet:"360_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
-  { id:"video", label:"Video", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / video",6),
+  { id:"video", label:"Video", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / video",6,
+      { num:"delivered_videos", den:"total_videos", numLabel:"Delivered", denLabel:"Total" }),
     panels:[
       { sheet:"video_ff",  title:"Fulfilment failure reasons", subtitle:"Failure reasons",
         tone:"red", kind:"reasons", pctWhole:true },
@@ -1165,6 +1166,13 @@ function aggSeries(laneId, colName, mode, regionsOverride, skipZero){
     return mode==="sum" ? total : total/a.length;
   });
 }
+/* Count columns aren't segment-prefixed in every sheet, so try both. */
+function countSeries(laneId, name, prefix, regionsOverride){
+  const px = prefix!=null ? prefix : segPrefix();
+  const withPx=aggSeries(laneId, px+name, "sum", regionsOverride);
+  if(withPx.some(v=>v!=null)) return withPx;
+  return aggSeries(laneId, name, "sum", regionsOverride);
+}
 function metricSeries(laneId, metric, prefix, regionsOverride){
   if(metric.src==="bq") return costSeries(laneId, metric, prefix, regionsOverride);
   const px = prefix!=null ? prefix : segPrefix();
@@ -1254,6 +1262,65 @@ function regionColor(r){
   return SERIES_COLORS[(i<0?0:i)%SERIES_COLORS.length];
 }
 /* One line per region on the region card, coloured to match the chips. */
+/* Percentage as a line against the left axis, counts as bars against the
+   right. Two scales in one card, so both axes are labelled. */
+function sparkCombo(pctSeries, metric, labels, num, den){
+  const pv=pctSeries.filter(v=>v!=null);
+  const cv=den.concat(num).filter(v=>v!=null);
+  if(!pv.length || !cv.length) return sparkline(pctSeries, metric, labels);
+  const W=268,H=140,padT=24,padB=20,padL=26,padR=32;
+  const base=H-padB, n=labels.length, inner=W-padL-padR;
+  const pr=niceRange(metric, Math.min.apply(null,pv), Math.max.apply(null,pv));
+  const pspan=(pr.hi-pr.lo)||1;
+  const cmax=Math.max.apply(null,cv)*1.15 || 1;          // counts read from zero
+  const x=i=> padL+inner*(i+0.5)/n;
+  const yp=v=> padT+(base-padT)*(1-(v-pr.lo)/pspan);
+  const yc=v=> base-(base-padT)*(v/cmax);
+  const slot=(inner/n)*0.56;
+  const fmtC=v=> v>=1000 ? (v/1000).toFixed(v>=10000?0:1)+"k" : String(Math.round(v));
+
+  let svg='<svg class="spark" viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" '+
+    'role="img" aria-label="'+esc(metric.label)+' with volume">';
+  svg+='<line x1="'+padL+'" y1="'+base+'" x2="'+(W-padR)+'" y2="'+base+'" stroke="var(--hair-strong)" stroke-width="1"/>';
+  for(let k=0;k<=2;k++){
+    const t=k/2, yy=padT+(base-padT)*(1-t);
+    if(k) svg+='<line x1="'+padL+'" y1="'+yy.toFixed(1)+'" x2="'+(W-padR)+'" y2="'+yy.toFixed(1)+
+               '" stroke="var(--hair)" stroke-width="0.7" stroke-dasharray="2 3"/>';
+    svg+='<text x="'+(padL-4)+'" y="'+(yy+2.4).toFixed(1)+'" text-anchor="end" font-size="6.5" fill="var(--muted)">'+
+         (pr.lo+pspan*t).toFixed(1)+'</text>';
+    svg+='<text x="'+(W-padR+4)+'" y="'+(yy+2.4).toFixed(1)+'" text-anchor="start" font-size="6.5" fill="var(--s2)">'+
+         fmtC(cmax*t)+'</text>';
+  }
+  labels.forEach(function(lab,i){
+    const t=den[i], d=num[i];
+    if(t!=null) svg+='<rect x="'+(x(i)-slot/2).toFixed(1)+'" y="'+yc(t).toFixed(1)+'" width="'+slot.toFixed(1)+
+      '" height="'+Math.max(0.6,base-yc(t)).toFixed(1)+'" rx="1.5" fill="var(--s2)" opacity=".18"/>';
+    if(d!=null) svg+='<rect x="'+(x(i)-slot/2).toFixed(1)+'" y="'+yc(d).toFixed(1)+'" width="'+slot.toFixed(1)+
+      '" height="'+Math.max(0.6,base-yc(d)).toFixed(1)+'" rx="1.5" fill="var(--s2)" opacity=".62"/>';
+    if(d!=null){
+      const top=yc(d);
+      svg+='<text transform="translate('+x(i).toFixed(1)+','+(top-2.5).toFixed(1)+') rotate(-90)" '+
+           'text-anchor="start" font-size="6.4" font-weight="600" fill="var(--s2)">'+fmtC(d)+'</text>';
+    }
+  });
+  const pts=[]; pctSeries.forEach((v,i)=>{ if(v!=null) pts.push([x(i),yp(v),i,v]); });
+  for(let k=1;k<pts.length;k++){
+    const a=pts[k-1],b=pts[k],c=toneColor(stepTone(metric,a[3],b[3]));
+    svg+='<path d="M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+' L'+b[0].toFixed(1)+' '+b[1].toFixed(1)+
+         '" fill="none" stroke="'+c+'" stroke-width="2" stroke-linecap="round"/>';
+  }
+  pts.forEach(function(p,k){
+    const c=toneColor(k===0?stepTone(metric,pts[1]?p[3]:null,pts[1]?pts[1][3]:null):stepTone(metric,pts[k-1][3],p[3]));
+    svg+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(k===pts.length-1?3.2:2.2)+
+         '" fill="'+(k===pts.length-1?c:"var(--panel)")+'" stroke="'+c+'" stroke-width="1.6"/>';
+    svg+='<text x="'+p[0].toFixed(1)+'" y="'+Math.max(9,p[1]-6).toFixed(1)+'" text-anchor="middle" '+
+         'font-size="8.5" font-weight="700" fill="'+c+'">'+fmt(metric,p[3])+'</text>';
+  });
+  labels.forEach((lab,i)=>{
+    svg+='<text x="'+x(i).toFixed(1)+'" y="'+(H-5)+'" text-anchor="middle" font-size="9" fill="var(--muted)">'+esc(lab)+'</text>';
+  });
+  return svg+'</svg>';
+}
 function sparkMulti(seriesList, metric, labels){
   const all=[]; seriesList.forEach(s=>s.values.forEach(v=>{ if(v!=null) all.push(v); }));
   if(all.length<2) return '<div class="spark" style="height:136px"></div>';
@@ -1563,7 +1630,7 @@ function render(){
     glanceHTML() +
     extraHTML() +
     programsHTML() +
-    footHTML();
+    (isAdmin() ? footHTML() : "");
   wire();
   syncSticky();
 }
@@ -1672,9 +1739,13 @@ function glanceHTML(){
         '</span></div>'+
         '<div class="val num">'+fmt(m,t.cur)+'</div>'+
         '<div class="cmp num">'+(t.prev!=null?"was "+fmt(m,t.prev):"no prior period")+'</div>'+
-        (perRegion && perRegion.length
-           ? sparkMulti(perRegion,m,periods)
-           : sparkline(series,m,periods))+'</article>';
+        (m.combo
+           ? sparkCombo(series, m, periods,
+               countSeries(lane.id, m.combo.num, null, lane.id==="region"?activeRegions():null),
+               countSeries(lane.id, m.combo.den, null, lane.id==="region"?activeRegions():null))
+           : (perRegion && perRegion.length
+                ? sparkMulti(perRegion,m,periods)
+                : sparkline(series,m,periods)))+'</article>';
     });
   });
   return html+'</div>';
