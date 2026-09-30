@@ -13,7 +13,7 @@
   --canvas:#ECEFEE; --panel:#FFFFFF; --panel-sunk:#F4F6F5;
   --ink:#0F1E1C; --ink-2:#334744; --muted:#6B7B78; --hair:#DCE3E1; --hair-strong:#C4CFCC;
   --teal:#12706B; --teal-soft:#E3EFEE; --deep:#0C2E2C;
-  --up:#1B7A46; --down:#B3261E; --flat:#7A8683;
+  --up:#1B7A46; --down:#B3261E; --flat:#7A8683; --orange:#D97706;
   --s1:#12706B; --s2:#2C5F8A; --s3:#7A3E6D; --s4:#A5761B; --s5:#55636B;
   --r-card:10px; --r-panel:14px; --r-pill:999px;
 }
@@ -322,6 +322,7 @@ const PRODUCTS = [
     ]},
   { id:"video", label:"Video", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / video",6,
       { num:"delivered_videos", den:"total_videos", numLabel:"Delivered", denLabel:"Total" }),
+    quality:{ sheet:"video_qs", title:"Quality Chart" },
     panels:[
       { sheet:"video_ff",  title:"Fulfilment failure reasons", subtitle:"Failure reasons",
         tone:"red", kind:"reasons", pctWhole:true },
@@ -387,7 +388,7 @@ const state = {
   drillRegion:null, recordsLane:"vin", recordsQuery:"", hidden:new Set(),
   sortCol:null, sortDir:-1,
   data:{}, loading:false, error:null, synced:null, user:null, access:null, denied:false, loginLog:null,
-  cost:null, costError:null, costLatest:null, extra:null, programs:null
+  cost:null, costError:null, costLatest:null, extra:null, programs:null, quality:null
 };
 function isAdmin(){ return !!(state.user && state.user.admin); }
 /* Sheets are cached per product, so 360's rooftop rows never overwrite images'. */
@@ -651,6 +652,7 @@ async function loadAll(){
     }
     state.extra=await loadExtra(prod);
     state.programs=await loadPrograms();
+    state.quality=await loadQuality(prod);
     state.costError=null;
     state.cost=await loadCost();
     state.costLatest=null;
@@ -1060,6 +1062,94 @@ function extraHTML(){
     '<div class="rgrid" style="--cols:'+Math.max(1,shown)+'">'+cards+'</div>';
 }
 
+async function loadQuality(prod){
+  if(!prod || !prod.quality || !prod.quality.sheet) return null;
+  try{
+    const t=await fetchTable(prod.quality.sheet);
+    const low=t.cols.map(c=>String(c.label||"").trim().toLowerCase());
+    const at=re=>low.findIndex(l=>re.test(l));
+    const i={ pt:at(/^period_type$|^granularity$/), p:at(/^period$/),
+              rev:at(/review/), pass:at(/pass/), iss:at(/issue_count|^issues?$/),
+              ipct:at(/issue_pct|issue_%/) };
+    return t.rows.map(function(r){
+      const g=k=> (i[k]>=0 && r.c && r.c[i[k]] && r.c[i[k]].v!=null) ? r.c[i[k]].v : null;
+      const rev=Number(g("rev")), iss=Number(g("iss"));
+      let ip=g("ipct");
+      /* issue_pct is blank on some rows - derive it rather than drop the point. */
+      if(ip==null && rev>0 && !isNaN(iss)) ip=(iss/rev)*100;
+      return { pt:normGran(g("pt")), p:g("p")==null?null:String(g("p")).trim(),
+               reviewed:isNaN(rev)?null:rev, passed:Number(g("pass")),
+               issues:isNaN(iss)?null:iss, issuePct:ip==null?null:Number(ip) };
+    }).filter(x=>x.p);
+  }catch(e){ return null; }
+}
+/* Reviewed and passed as bars on the right, issue rate as a line on the left. */
+function qualityHTML(){
+  const prod=PRODUCTS.find(p=>p.id===state.product);
+  if(!prod || !prod.quality || !state.quality) return "";
+  const periods=periodsOf();
+  const byP=new Map();
+  state.quality.forEach(function(r){ if(!r.pt||r.pt===state.granularity) byP.set(r.p,r); });
+  const rows=periods.map(p=>byP.get(p)||null);
+  if(!rows.some(r=>r&&r.reviewed!=null)) return "";
+
+  const W=1000,H=300,padL=58,padR=64,padT=30,padB=40;
+  const base=H-padB, n=periods.length, inner=W-padL-padR;
+  const pcts=rows.filter(r=>r&&r.issuePct!=null).map(r=>r.issuePct);
+  const cnts=rows.filter(r=>r).map(r=>Math.max(r.reviewed||0,r.passed||0));
+  const pmax=Math.max(1, Math.max.apply(null,pcts.length?pcts:[1])*1.3);
+  const cmax=Math.max(1, Math.max.apply(null,cnts.length?cnts:[1])*1.15);
+  const x=i=> padL+inner*(i+0.5)/n;
+  const yp=v=> base-(base-padT)*(v/pmax);
+  const yc=v=> base-(base-padT)*(v/cmax);
+  const slot=(inner/n)*0.5;
+  const fmtC=v=> v>=1000 ? (v/1000).toFixed(v>=10000?0:1)+"k" : String(Math.round(v));
+
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="300" role="img" aria-label="Quality">';
+  svg+='<line x1="'+padL+'" y1="'+base+'" x2="'+(W-padR)+'" y2="'+base+'" stroke="var(--hair-strong)"/>';
+  for(let k=0;k<=3;k++){
+    const t=k/3, yy=base-(base-padT)*t;
+    if(k) svg+='<line x1="'+padL+'" y1="'+yy.toFixed(1)+'" x2="'+(W-padR)+'" y2="'+yy.toFixed(1)+
+               '" stroke="var(--hair)" stroke-dasharray="3 4"/>';
+    svg+='<text x="'+(padL-9)+'" y="'+(yy+4).toFixed(1)+'" text-anchor="end" font-size="11" fill="var(--down)">'+
+         (pmax*t).toFixed(1)+'%</text>';
+    svg+='<text x="'+(W-padR+9)+'" y="'+(yy+4).toFixed(1)+'" text-anchor="start" font-size="11" fill="var(--s2)">'+
+         fmtC(cmax*t)+'</text>';
+  }
+  rows.forEach(function(r,i){
+    if(!r) return;
+    const lab=periods[i];
+    if(r.reviewed!=null) svg+='<rect class="pt" x="'+(x(i)-slot/2).toFixed(1)+'" y="'+yc(r.reviewed).toFixed(1)+
+      '" width="'+slot.toFixed(1)+'" height="'+Math.max(1,base-yc(r.reviewed)).toFixed(1)+
+      '" rx="3" fill="var(--s2)" opacity=".28" data-label="Reviewed" data-x="'+esc(lab)+
+      '" data-v="'+esc((r.reviewed).toLocaleString("en-IN"))+'"></rect>';
+    if(r.passed) svg+='<rect class="pt" x="'+(x(i)-slot/2+slot*0.2).toFixed(1)+'" y="'+yc(r.passed).toFixed(1)+
+      '" width="'+(slot*0.6).toFixed(1)+'" height="'+Math.max(1,base-yc(r.passed)).toFixed(1)+
+      '" rx="3" fill="var(--up)" opacity=".85" data-label="Passed" data-x="'+esc(lab)+
+      '" data-v="'+esc((r.passed).toLocaleString("en-IN"))+'"></rect>';
+  });
+  const pts=[]; rows.forEach((r,i)=>{ if(r&&r.issuePct!=null) pts.push([x(i),yp(r.issuePct),i,r.issuePct,r]); });
+  if(pts.length>1) svg+='<path d="'+pts.map((p,k)=>(k?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ")+
+    '" fill="none" stroke="var(--down)" stroke-width="2.4" stroke-linejoin="round"/>';
+  pts.forEach(function(p){
+    svg+='<circle class="pt" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="4.5" fill="var(--panel)" '+
+         'stroke="var(--down)" stroke-width="2.4" data-label="Issue rate" data-x="'+esc(periods[p[2]])+
+         '" data-v="'+esc(p[3].toFixed(1)+"% \u00b7 "+(p[4].issues==null?"?":p[4].issues)+" issues")+'"></circle>';
+    svg+='<text x="'+p[0].toFixed(1)+'" y="'+Math.max(16,p[1]-11).toFixed(1)+'" text-anchor="middle" '+
+         'font-size="11.5" font-weight="600" fill="var(--down)">'+p[3].toFixed(1)+'%</text>';
+  });
+  periods.forEach((lab,i)=>{
+    svg+='<text x="'+x(i).toFixed(1)+'" y="'+(H-14)+'" text-anchor="middle" font-size="12" font-weight="500" fill="var(--ink-2)">'+esc(lab)+'</text>';
+  });
+  svg+='</svg>';
+  return '<div class="sec"><h2>'+esc(prod.quality.title||"Quality")+'</h2>'+
+    '<span class="note">From the '+esc(prod.quality.sheet)+' tab \u00b7 issue rate on the left, counts on the right \u00b7 hover for numbers</span></div>'+
+    '<div class="panel">'+svg+
+    '<div class="legend"><span><span class="swatch" style="background:var(--s2);opacity:.5"></span>Reviewed</span>'+
+    '<span><span class="swatch" style="background:var(--up)"></span>Passed</span>'+
+    '<span><span class="swatch" style="background:var(--down)"></span>Issue rate</span></div></div>';
+}
+
 /* Programme list, shared across products and split on its product column. */
 async function loadPrograms(){
   try{
@@ -1288,20 +1378,22 @@ function sparkCombo(pctSeries, metric, labels, num, den){
                '" stroke="var(--hair)" stroke-width="0.7" stroke-dasharray="2 3"/>';
     svg+='<text x="'+(padL-4)+'" y="'+(yy+2.4).toFixed(1)+'" text-anchor="end" font-size="6.5" fill="var(--muted)">'+
          (pr.lo+pspan*t).toFixed(1)+'</text>';
-    svg+='<text x="'+(W-padR+4)+'" y="'+(yy+2.4).toFixed(1)+'" text-anchor="start" font-size="6.5" fill="var(--s2)">'+
+    svg+='<text x="'+(W-padR+4)+'" y="'+(yy+2.4).toFixed(1)+'" text-anchor="start" font-size="6.5" fill="var(--orange)">'+
          fmtC(cmax*t)+'</text>';
   }
   labels.forEach(function(lab,i){
     const t=den[i], d=num[i];
-    if(t!=null) svg+='<rect x="'+(x(i)-slot/2).toFixed(1)+'" y="'+yc(t).toFixed(1)+'" width="'+slot.toFixed(1)+
-      '" height="'+Math.max(0.6,base-yc(t)).toFixed(1)+'" rx="1.5" fill="var(--s2)" opacity=".18"/>';
-    if(d!=null) svg+='<rect x="'+(x(i)-slot/2).toFixed(1)+'" y="'+yc(d).toFixed(1)+'" width="'+slot.toFixed(1)+
-      '" height="'+Math.max(0.6,base-yc(d)).toFixed(1)+'" rx="1.5" fill="var(--s2)" opacity=".62"/>';
-    if(d!=null){
-      const top=yc(d);
-      svg+='<text transform="translate('+x(i).toFixed(1)+','+(top-2.5).toFixed(1)+') rotate(-90)" '+
-           'text-anchor="start" font-size="6.4" font-weight="600" fill="var(--s2)">'+fmtC(d)+'</text>';
-    }
+    /* Counts show on hover rather than on the chart - five labels per period
+       crowded the line out. class="pt" is what the tooltip binds to. */
+    if(t!=null) svg+='<rect class="pt" x="'+(x(i)-slot/2).toFixed(1)+'" y="'+yc(t).toFixed(1)+'" width="'+slot.toFixed(1)+
+      '" height="'+Math.max(0.6,base-yc(t)).toFixed(1)+'" rx="1.5" fill="var(--orange)" opacity=".85" '+
+      'data-label="'+esc((metric.combo&&metric.combo.denLabel)||"Total")+'" data-x="'+esc(lab)+
+      '" data-v="'+esc(Math.round(t).toLocaleString("en-IN"))+'"></rect>';
+    if(d!=null) svg+='<rect class="pt" x="'+(x(i)-slot/2+slot*0.22).toFixed(1)+'" y="'+yc(d).toFixed(1)+
+      '" width="'+(slot*0.56).toFixed(1)+'" height="'+Math.max(0.6,base-yc(d)).toFixed(1)+
+      '" rx="1.5" fill="var(--up)" opacity=".92" '+
+      'data-label="'+esc((metric.combo&&metric.combo.numLabel)||"Delivered")+'" data-x="'+esc(lab)+
+      '" data-v="'+esc(Math.round(d).toLocaleString("en-IN"))+'"></rect>';
   });
   const pts=[]; pctSeries.forEach((v,i)=>{ if(v!=null) pts.push([x(i),yp(v),i,v]); });
   for(let k=1;k<pts.length;k++){
@@ -1628,6 +1720,7 @@ function render(){
   main.innerHTML =
     controlsHTML() +
     glanceHTML() +
+    qualityHTML() +
     extraHTML() +
     programsHTML() +
     (isAdmin() ? footHTML() : "");
