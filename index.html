@@ -303,7 +303,7 @@ const PRODUCTS = [
     metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / image",6,
       { num:"total_out", den:"total_in", numLabel:"Delivered", denLabel:"Total" }),
     quality:{ sheet:"image_qs", title:"Quality Chart" },
-    panels:[{ sheet:"Image_ff", title:"What affected delivery", kind:"log" }],
+    incidents:{ sheet:"Image_ff", title:"What affected delivery" },
     lanes:[
       { id:"vin",    label:"VIN",     sheet:"images_vin",    color:"var(--s1)", blurb:"Every vehicle delivered" },
       { id:"rt",     label:"Rooftop", sheet:"images_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
@@ -313,6 +313,7 @@ const PRODUCTS = [
     metrics:mkMetrics("delivery_pct","Fulfilment","Cost / spin",6,
       { num:"total_delivered", den:"total_vin", numLabel:"Delivered", denLabel:"Total" }),
     quality:{ sheet:"360_qs", title:"Quality Chart" },
+    incidents:{ sheet:"360_ff", title:"What affected delivery" },
     /* All three read 360_issue and split on its category column. */
     panels:[
       { sheet:"360_issue", cat:"QC Failed", title:"QC Failed reasons",
@@ -395,7 +396,7 @@ const state = {
   drillRegion:null, recordsLane:"vin", recordsQuery:"", hidden:new Set(),
   sortCol:null, sortDir:-1,
   data:{}, loading:false, error:null, synced:null, user:null, access:null, denied:false, loginLog:null,
-  cost:null, costError:null, costLatest:null, extra:null, programs:null, quality:null
+  cost:null, costError:null, costLatest:null, extras:{}, programs:null, qualities:{}
 };
 function isAdmin(){ return !!(state.user && state.user.admin); }
 /* Sheets are cached per product, so 360's rooftop rows never overwrite images'. */
@@ -657,9 +658,9 @@ async function loadAll(){
       allRegions().forEach(r=>regSet().add(r));
       state.regionsInit[state.product]=true;
     }
-    state.extra=await loadExtra(prod);
+    state.extras[prod.id]=await loadExtra(prod);
     state.programs=await loadPrograms();
-    state.quality=await loadQuality(prod);
+    state.qualities[prod.id]=await loadQuality(prod);
     state.costError=null;
     state.cost=await loadCost();
     state.costLatest=null;
@@ -935,11 +936,17 @@ function costSeries(laneId, metric, prefix, regionsOverride){
 
 /* Fixed panels that ignore every filter. Rows come either from the config or
    from a workbook tab shaped reason | count | %. */
+function panelsOf(prod){
+  const list=(prod&&prod.panels)?prod.panels.slice():[];
+  if(prod&&prod.incidents) list.push(Object.assign({kind:"log"}, prod.incidents));
+  return list;
+}
 async function loadExtra(prod){
-  if(!prod || !prod.panels) return null;
+  const all=panelsOf(prod);
+  if(!all.length) return null;
   const out={};
   const seen={};
-  const unique=prod.panels.filter(function(p){
+  const unique=all.filter(function(p){
     if(!p.sheet || seen[p.sheet]) return false;
     seen[p.sheet]=true; return true;
   });
@@ -990,13 +997,13 @@ async function loadExtra(prod){
 }
 function extraHTML(){
   const prod=PRODUCTS.find(p=>p.id===state.product);
-  if(!prod || !prod.panels) return "";
+  if(!prod || !prod.panels || !prod.panels.length) return "";
   const pct=v=>(v==null?"\u2014":(v*100).toFixed(2)+"%");
   const periodsNow=periodsOf();
   const latestPeriod=periodsNow.length?periodsNow[periodsNow.length-1]:null;
   let filtered=false;
   const cards=prod.panels.map(function(p){
-    let rows = p.rows || (state.extra && state.extra[p.sheet]) || null;
+    let rows = p.rows || (state.extras[state.product] && state.extras[state.product][p.sheet]) || null;
     if(!rows) return "";
 
     if(p.kind==="table"){
@@ -1061,8 +1068,7 @@ function extraHTML(){
   }).join("");
   const shown=cards.split("<section").length-1;
   if(!cards.replace(/\s/g,"")) return "";
-  const isLog=prod.panels.every(p=>p.kind==="log");
-  return '<div class="sec"><h2>'+(isLog?"Delivery incidents":"Fulfilment Gap Reasons")+'</h2>'+
+  return '<div class="sec"><h2>Fulfilment Gap Reasons</h2>'+
     '<span class="note">'+(filtered
       ? esc(periodName(latestPeriod||""))+' \u00b7 follows the period filter'
       : 'Fixed \u2014 not affected by the filters above')+'</span></div>'+
@@ -1096,10 +1102,10 @@ async function loadQuality(prod){
 /* Reviewed and passed as bars on the right, issue rate as a line on the left. */
 function qualityHTML(){
   const prod=PRODUCTS.find(p=>p.id===state.product);
-  if(!prod || !prod.quality || !state.quality) return "";
+  if(!prod || !prod.quality || !state.qualities[state.product]) return "";
   const periods=periodsOf();
   const byP=new Map();
-  state.quality.forEach(function(r){ if(!r.pt||r.pt===state.granularity) byP.set(r.p,r); });
+  state.qualities[state.product].forEach(function(r){ if(!r.pt||r.pt===state.granularity) byP.set(r.p,r); });
   const rows=periods.map(p=>byP.get(p)||null);
   if(!rows.some(r=>r&&r.reviewed!=null)) return "";
 
@@ -1173,6 +1179,25 @@ function qualityHTML(){
     '<span><span class="swatch" style="background:var(--orange)"></span>Not passed</span>'+
     '<span><span class="swatch" style="background:var(--down)"></span>Issue rate</span>'+
     '<span style="color:var(--muted)">bar height = reviewed</span></div></div>';
+}
+
+/* Dated incident log. Independent of every filter, on all products that have one. */
+function incidentsHTML(){
+  const prod=PRODUCTS.find(p=>p.id===state.product);
+  if(!prod || !prod.incidents) return "";
+  const rows=(state.extras[state.product]||{})[prod.incidents.sheet];
+  if(!rows || !rows.length) return "";
+  const items=rows.map(function(r){
+    return '<li class="ev"><div class="ev-when num">'+
+      (r.at ? esc(r.at.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})) : "\u2014")+'</div>'+
+      '<div class="ev-body"><span class="ev-tag">'+esc(r.by||"\u2014")+'</span>'+
+      '<p>'+esc(r.text)+'</p></div></li>';
+  }).join("");
+  return '<div class="sec"><h2>Delivery incidents</h2>'+
+    '<span class="note">'+rows.length+' logged \u00b7 not affected by the filters above</span></div>'+
+    '<div class="rgrid" style="--cols:1"><section class="rcard ev-card">'+
+    '<div class="rcard-hd"><h3>'+esc(prod.incidents.title||"What affected delivery")+'</h3></div>'+
+    '<ul class="evs">'+items+'</ul></section></div>';
 }
 
 /* Programme list, shared across products and split on its product column. */
@@ -1778,6 +1803,7 @@ function render(){
     glanceHTML() +
     qualityHTML() +
     extraHTML() +
+    incidentsHTML() +
     programsHTML() +
     (isAdmin() ? footHTML() : "");
   wire();
@@ -1793,7 +1819,10 @@ function renderTabs(){
     state.product=b.dataset.prod;
     const p=PRODUCTS.find(x=>x.id===state.product);
     const first=p&&p.lanes[0];
-    if(p&&p.status==="live"&&first&&!state.data[state.product+":"+first.id]) loadAll(); else render();
+    const needSheets=p&&p.status==="live"&&first&&!state.data[state.product+":"+first.id];
+    const needExtras=p&&p.status==="live"&&panelsOf(p).length&&!state.extras[p.id];
+    const needQuality=p&&p.status==="live"&&p.quality&&!state.qualities[p.id];
+    if(needSheets||needExtras||needQuality) loadAll(); else render();
   });
 }
 function renderSync(){
