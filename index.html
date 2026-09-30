@@ -299,14 +299,20 @@ function mkMetrics(lastId,lastLabel,costLabel,slaHrs,combo){
 }
 
 const PRODUCTS = [
-  { id:"images", label:"Images", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / image",6),
+  { id:"images", label:"Images", status:"live",
+    metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / image",6,
+      { num:"total_out", den:"total_in", numLabel:"Delivered", denLabel:"Total" }),
+    quality:{ sheet:"image_qs", title:"Quality Chart" },
     panels:[{ sheet:"Image_ff", title:"What affected delivery", kind:"log" }],
     lanes:[
       { id:"vin",    label:"VIN",     sheet:"images_vin",    color:"var(--s1)", blurb:"Every vehicle delivered" },
       { id:"rt",     label:"Rooftop", sheet:"images_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
       { id:"region", label:"Region",  sheet:"images_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
-  { id:"spin", label:"360", status:"live", metrics:mkMetrics("delivery_pct","Fulfilment","Cost / spin",6),
+  { id:"spin", label:"360", status:"live",
+    metrics:mkMetrics("delivery_pct","Fulfilment","Cost / spin",6,
+      { num:"total_delivered", den:"total_vin", numLabel:"Delivered", denLabel:"Total" }),
+    quality:{ sheet:"360_qs", title:"Quality Chart" },
     /* All three read 360_issue and split on its category column. */
     panels:[
       { sheet:"360_issue", cat:"QC Failed", title:"QC Failed reasons",
@@ -1278,8 +1284,15 @@ function aggSeries(laneId, colName, mode, regionsOverride, skipZero){
 /* Count columns aren't segment-prefixed in every sheet, so try both. */
 function countSeries(laneId, name, prefix, regionsOverride){
   const px = prefix!=null ? prefix : segPrefix();
-  const withPx=aggSeries(laneId, px+name, "sum", regionsOverride);
-  if(withPx.some(v=>v!=null)) return withPx;
+  if(px){
+    /* ent_total_in (images) and total_ent_vin (360) are both in use. */
+    const tries=[ px+name, name.replace(/^total_/, "total_"+px) ];
+    for(let i=0;i<tries.length;i++){
+      if(tries[i]===name) continue;
+      const got=aggSeries(laneId, tries[i], "sum", regionsOverride);
+      if(got.some(v=>v!=null)) return got;
+    }
+  }
   return aggSeries(laneId, name, "sum", regionsOverride);
 }
 function metricSeries(laneId, metric, prefix, regionsOverride){
@@ -1475,16 +1488,22 @@ function sparkMulti(seriesList, metric, labels){
      than stacked - the strip underneath always carries the current value. */
   const placed=[];
   if(bar){
+    /* Coloured by movement, like the VIN and rooftop cards - each bar against
+       that region's own previous period. Hover says which region it is. */
     seriesList.forEach(function(sr,si){
+      let prev=null;
       sr.values.forEach(function(v,i){
         if(v==null) return;
+        const c=toneColor(stepTone(metric, prev, v));
+        prev=v;
         const cx=x(i)-bar.slot/2+bar.bw*si+bar.bw/2, yy=y(v), h=Math.max(1, base-yy);
-        svg+='<rect x="'+(cx-bar.bw/2+0.45).toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+
+        svg+='<rect class="pt" x="'+(cx-bar.bw/2+0.45).toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+
              Math.max(0.9,bar.bw-0.9).toFixed(1)+'" height="'+h.toFixed(1)+
-             '" rx="1" fill="'+sr.color+'" opacity=".9"/>';
+             '" rx="1" fill="'+c+'" opacity=".9" data-label="'+esc(sr.name)+'" data-x="'+
+             esc(labels[i]||"")+'" data-v="'+esc(fmt(metric,v))+'"></rect>';
         svg+='<text transform="translate('+cx.toFixed(1)+','+(yy-2.5).toFixed(1)+') rotate(-90)" '+
              'text-anchor="start" font-size="'+bar.fs.toFixed(1)+'" font-weight="600" fill="'+
-             sr.color+'">'+fmt(metric,v)+'</text>';
+             c+'">'+fmt(metric,v)+'</text>';
       });
     });
     labels.forEach((lab,i)=>{
@@ -1496,18 +1515,24 @@ function sparkMulti(seriesList, metric, labels){
     const pts=[];
     sr.values.forEach((v,i)=>{ if(v!=null) pts.push([x(i),y(v),i,v]); });
     if(!pts.length) return;
-    if(pts.length>1)
-      svg+='<path d="'+pts.map((p,k)=>(k?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ")+
-           '" fill="none" stroke="'+sr.color+'" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" opacity=".9"/>';
+    for(let k=1;k<pts.length;k++){
+      const a=pts[k-1], b=pts[k];
+      svg+='<path d="M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+' L'+b[0].toFixed(1)+' '+b[1].toFixed(1)+
+           '" fill="none" stroke="'+toneColor(stepTone(metric,a[3],b[3]))+
+           '" stroke-width="1.8" stroke-linecap="round" opacity=".9"/>';
+    }
     pts.forEach(function(p,k){
       const isLast=k===pts.length-1;
-      svg+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(isLast?2.8:1.9)+'" fill="'+sr.color+'"/>';
+      const c=toneColor(stepTone(metric, k?pts[k-1][3]:null, p[3]));
+      svg+='<circle class="pt" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="'+(isLast?2.8:1.9)+
+           '" fill="'+c+'" data-label="'+esc(sr.name)+'" data-x="'+esc(labels[p[2]]||"")+
+           '" data-v="'+esc(fmt(metric,p[3]))+'"></circle>';
       const ly=p[1]-5;
       if(ly<9) return;
       if(placed.some(q=>Math.abs(q[0]-p[0])<26 && Math.abs(q[1]-ly)<7)) return;
       placed.push([p[0],ly]);
       svg+='<text x="'+p[0].toFixed(1)+'" y="'+ly.toFixed(1)+'" text-anchor="middle" font-size="8" '+
-           'font-weight="600" fill="'+sr.color+'">'+fmt(metric,p[3])+'</text>';
+           'font-weight="600" fill="'+c+'">'+fmt(metric,p[3])+'</text>';
     });
   });
   labels.forEach((lab,i)=>{
