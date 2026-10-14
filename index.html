@@ -337,7 +337,8 @@ const PRODUCTS = [
       { id:"region", label:"Region",  sheet:"360_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
   { id:"video", label:"Video", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / video",6,
-      { num:"delivered_videos", den:"total_videos", numLabel:"Delivered", denLabel:"Total" }),
+      /* pendingNote: with video-metrics#2, SLA total = this total minus videos pending QC <6h, so the MTD gap can be explained */
+      { num:"delivered_videos", den:"total_videos", numLabel:"Delivered", denLabel:"Total", pendingNote:true }),
     quality:{ sheet:"video_qs", title:"Quality Chart" },
     panels:[
       { sheet:"video_ff",  title:"Fulfilment failure reasons", subtitle:"Failure reasons",
