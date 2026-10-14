@@ -290,7 +290,7 @@ const SHEET_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit"
    population, bad the part that missed. A sheet without them shows the value only. */
 function mkMetrics(lastId,lastLabel,costLabel,slaHrs,combo){
   const h=slaHrs||6;
-  const slaTip={ n:"sla_total", bad:"sla_breached", nLabel:"Total", goodLabel:"Within SLA", badLabel:"SLA breach" };
+  const slaTip={ n:"sla_checked", bad:"sla_breached", nLabel:"Checked", goodLabel:"Within SLA", badLabel:"SLA breach" };
   const tatTip={ n:"tat_measured", bad:"tat_over_sla", nLabel:"Measured", goodLabel:"Within "+h+"h", badLabel:"Over "+h+"h" };
   return [
     { id:"sla_pct",     label:"SLA < "+h+" hrs", kind:"pct", better:"high", tip:slaTip },
