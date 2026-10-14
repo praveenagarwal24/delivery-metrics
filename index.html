@@ -290,7 +290,8 @@ const SHEET_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit"
    population, bad the part that missed. A sheet without them shows the value only. */
 function mkMetrics(lastId,lastLabel,costLabel,slaHrs,combo){
   const h=slaHrs||6;
-  const slaTip={ n:"sla_checked", bad:"sla_breached", nLabel:"Total", goodLabel:"Within SLA", badLabel:"SLA breach" };
+  /* total = the fulfilment total; SKUs in it but not in the SLA total were received under 6h ago and not yet judged (MTD only). */
+  const slaTip={ n:"sla_checked", bad:"sla_breached", total:combo?combo.den:null, nLabel:"Total", goodLabel:"Within SLA", badLabel:"SLA breach" };
   const tatTip={ n:"tat_measured", bad:"tat_over_sla", nLabel:"Measured", goodLabel:"Within "+h+"h", badLabel:"Over "+h+"h" };
   return [
     { id:"sla_pct",     label:"SLA < "+h+" hrs", kind:"pct", better:"high", tip:slaTip },
@@ -1333,7 +1334,8 @@ function tipCounts(laneId, metric, regionsOverride){
   const px=segPrefix();
   const n=aggSeries(laneId, px+metric.tip.n, "sum", regionsOverride);
   const bad=aggSeries(laneId, px+metric.tip.bad, "sum", regionsOverride);
-  return n.some(v=>v!=null) ? { n:n, bad:bad } : null;
+  const tot=metric.tip.total ? aggSeries(laneId, px+metric.tip.total, "sum", regionsOverride) : null;
+  return n.some(v=>v!=null) ? { n:n, bad:bad, tot:tot } : null;
 }
 /* Same layout as the fulfilment tooltip: period, the counts, then the value.
    Rooftop cards count rooftops, everything else counts SKUs. */
@@ -1345,7 +1347,11 @@ function tipHTML(metric, lab, v, counts, i, unit){
     n!=null?line(t.nLabel, num(n)):null,
     (n!=null&&bad!=null)?line(t.goodLabel, num(n-bad)):null,
     bad!=null?line(t.badLabel, num(bad)):null,
-    v!=null?line(esc(metric.label), fmt(metric,v)):null ].filter(Boolean).join("<br>").replace(/"/g,"&quot;");
+    v!=null?line(esc(metric.label), fmt(metric,v)):null,
+    /* In-progress period: SKUs received too recently to judge. SKU lanes only -
+       rooftop SLA counts rooftops, so the fulfilment total is not comparable. */
+    (t.total && !unit && /^MTD\b/.test(String(lab)) && counts && counts.tot && counts.tot[i]!=null && n!=null && counts.tot[i]-n>0)
+      ? '<span style="color:#9DB4B1">+'+num(counts.tot[i]-n)+' received in the last 6h, not judged yet</span>' : null ].filter(Boolean).join("<br>").replace(/"/g,"&quot;");
 }
 function metricSeries(laneId, metric, prefix, regionsOverride){
   if(metric.src==="bq") return costSeries(laneId, metric, prefix, regionsOverride);
