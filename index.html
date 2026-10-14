@@ -291,7 +291,7 @@ const SHEET_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit"
 function mkMetrics(lastId,lastLabel,costLabel,slaHrs,combo){
   const h=slaHrs||6;
   /* total = the fulfilment total; SKUs in it but not in the SLA total were received under 6h ago and not yet judged (MTD only). */
-  const slaTip={ n:"sla_checked", bad:"sla_breached", total:combo?combo.den:null, nLabel:"Total", goodLabel:"Within SLA", badLabel:"SLA breach" };
+  const slaTip={ n:"sla_checked", bad:"sla_breached", total:(combo&&combo.pendingNote)?combo.den:null, nLabel:"Total", goodLabel:"Within SLA", badLabel:"SLA breach" };
   const tatTip={ n:"tat_measured", bad:"tat_over_sla", nLabel:"Measured", goodLabel:"Within "+h+"h", badLabel:"Over "+h+"h" };
   return [
     { id:"sla_pct",     label:"SLA < "+h+" hrs", kind:"pct", better:"high", tip:slaTip },
@@ -307,12 +307,14 @@ function mkMetrics(lastId,lastLabel,costLabel,slaHrs,combo){
 const PRODUCTS = [
   { id:"images", label:"Images", status:"live",
     metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / image",6,
-      { num:"total_out", den:"total_in", numLabel:"Delivered", denLabel:"Total" }),
+      /* pendingNote: SLA total = this total minus SKUs received <6h ago (cards 12998/13000), so the MTD gap can be explained */
+      { num:"total_out", den:"total_in", numLabel:"Delivered", denLabel:"Total", pendingNote:true }),
     quality:{ sheet:"image_qs", title:"Quality Chart" },
     incidents:{ sheet:"Image_ff", title:"What affected delivery" },
     lanes:[
       { id:"vin",    label:"VIN",     sheet:"images_vin",    color:"var(--s1)", blurb:"Every vehicle delivered" },
-      { id:"rt",     label:"Rooftop", sheet:"images_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
+      /* tipUnit: card 13001 counts rooftops in its SLA/TAT columns, not SKUs */
+      { id:"rt",     label:"Rooftop", sheet:"images_rt",     color:"var(--s2)", blurb:"Rolled up per dealership", tipUnit:"rooftops" },
       { id:"region", label:"Region",  sheet:"images_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
   { id:"spin", label:"360", status:"live",
@@ -344,7 +346,8 @@ const PRODUCTS = [
     ],
     lanes:[
       { id:"vin",    label:"VIN",     sheet:"video_vin",    color:"var(--s1)", blurb:"Every vehicle delivered" },
-      { id:"rt",     label:"Rooftop", sheet:"video_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
+      /* tipUnit: video-metrics writes rooftop counts (not videos) to video_rt's SLA/TAT count columns */
+      { id:"rt",     label:"Rooftop", sheet:"video_rt",     color:"var(--s2)", blurb:"Rolled up per dealership", tipUnit:"rooftops" },
       { id:"region", label:"Region",  sheet:"video_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]}
 ];
@@ -1973,7 +1976,7 @@ function glanceHTML(){
                countSeries(lane.id, m.combo.den, null, lane.id==="region"?activeRegions():null))
            : (perRegion && perRegion.length
                 ? sparkMulti(perRegion,m,periods)
-                : sparkline(series,m,periods,counts,lane.id==="rt"?"rooftops":null)))+'</article>';
+                : sparkline(series,m,periods,counts,lane.tipUnit||null)))+'</article>';
     });
   });
   return html+'</div>';
