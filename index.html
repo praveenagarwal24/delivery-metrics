@@ -346,7 +346,8 @@ const PRODUCTS = [
     ],
     lanes:[
       { id:"vin",    label:"VIN",     sheet:"video_vin",    color:"var(--s1)", blurb:"Every vehicle delivered" },
-      { id:"rt",     label:"Rooftop", sheet:"video_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
+      /* tipUnit: video-metrics writes rooftop counts (not videos) to video_rt's SLA/TAT count columns */
+      { id:"rt",     label:"Rooftop", sheet:"video_rt",     color:"var(--s2)", blurb:"Rolled up per dealership", tipUnit:"rooftops" },
       { id:"region", label:"Region",  sheet:"video_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]}
 ];
