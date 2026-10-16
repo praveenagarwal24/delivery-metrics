@@ -317,7 +317,9 @@ const PRODUCTS = [
       { id:"rt",     label:"Rooftop", sheet:"images_rt",     color:"var(--s2)", blurb:"Rolled up per dealership", tipUnit:"rooftops" },
       { id:"region", label:"Region",  sheet:"images_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
-  { id:"spin", label:"360", status:"live",
+  /* vfToggle: each lane sheet has a <sheet>_vf twin that includes Validation Failed spins
+     (360-tracker-dashboard sync-sheets.js). The plain sheets leave them out and are the default. */
+  { id:"spin", label:"360", status:"live", vfToggle:true,
     metrics:mkMetrics("delivery_pct","Fulfilment","Cost / spin",6,
       { num:"total_delivered", den:"total_vin", numLabel:"Delivered", denLabel:"Total" }),
     quality:{ sheet:"360_qs", title:"Quality Chart" },
@@ -399,7 +401,7 @@ const SERIES_COLORS = ["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--s5
 
 /* ============================================================ */
 const state = {
-  product:"images", granularity:"month", segment:"all",
+  product:"images", granularity:"month", segment:"all", includeVF:false,
   regions:{}, regionsInit:{},
   trendMetric:"sla_pct", trendSplit:"lane", colorMode:"auto", scale:"linear", chart:"line", hiddenCards:new Set(["p95_tat_hrs"]),   // off until its chip is clicked
   matrixMetric:"sla_pct", matrixLane:"vin",
@@ -409,8 +411,12 @@ const state = {
   cost:null, costError:null, costLatest:null, extras:{}, programs:null, qualities:{}
 };
 function isAdmin(){ return !!(state.user && state.user.admin); }
-/* Sheets are cached per product, so 360's rooftop rows never overwrite images'. */
-function key(laneId){ return state.product+":"+laneId; }
+/* Sheets are cached per product (and per Validation Failed mode on 360), so 360's
+   rooftop rows never overwrite images', and the two 360 modes never mix. */
+function curProduct(){ return PRODUCTS.find(p=>p.id===state.product)||{}; }
+function vfOn(){ return !!(curProduct().vfToggle && state.includeVF); }
+function key(laneId){ return state.product+(vfOn()?":vf":"")+":"+laneId; }
+function laneSheet(l){ return vfOn() ? l.sheet+"_vf" : l.sheet; }
 function raw(laneId){ return state.data[key(laneId)] || []; }
 function regSet(){
   if(!state.regions[state.product]) state.regions[state.product]=new Set();
@@ -662,7 +668,7 @@ async function loadAll(){
   if(!prod||prod.status!=="live"||!prod.lanes.length) return;
   state.loading=true; state.error=null; render();
   try{
-    const results=await Promise.all(prod.lanes.map(l=>loadSheet(l.sheet)));
+    const results=await Promise.all(prod.lanes.map(l=>loadSheet(laneSheet(l))));
     prod.lanes.forEach((l,i)=>{ state.data[key(l.id)]=results[i]; });
     if(!state.regionsInit[state.product]){
       allRegions().forEach(r=>regSet().add(r));
@@ -1871,7 +1877,7 @@ function renderTabs(){
     state.product=b.dataset.prod;
     const p=PRODUCTS.find(x=>x.id===state.product);
     const first=p&&p.lanes[0];
-    const needSheets=p&&p.status==="live"&&first&&!state.data[state.product+":"+first.id];
+    const needSheets=p&&p.status==="live"&&first&&!state.data[key(first.id)];
     const needExtras=p&&p.status==="live"&&panelsOf(p).length&&!state.extras[p.id];
     const needQuality=p&&p.status==="live"&&p.quality&&!state.qualities[p.id];
     if(needSheets||needExtras||needQuality) loadAll(); else render();
@@ -1910,6 +1916,12 @@ function controlsHTML(){
     '<div class="ctl"><span>Segment</span><div class="chips">'+
       SEGMENTS.map(s=>'<button class="chip" data-seg="'+s.id+'" aria-pressed="'+(s.id===state.segment)+'">'+esc(s.label)+'</button>').join("")+
     '</div></div>'+
+    (curProduct().vfToggle
+      ? '<div class="ctl"><span title="Spins that failed validation (dealer input), e.g. too few or unusable images">Validation Failed</span><div class="seg">'+
+          '<button data-vf="0" aria-pressed="'+(!state.includeVF)+'">Excluded</button>'+
+          '<button data-vf="1" aria-pressed="'+state.includeVF+'">Included</button>'+
+        '</div></div>'
+      : '')+
     (COST && !state.cost ? '<div class="ctl"><button class="chip" id="bqBtn"'+
        (state.costError ? ' title="'+esc(state.costError)+'"' : '')+'>'+
        (state.costError ? "Cost unavailable \u2014 retry" : "Connect BigQuery for cost")+'</button>'+
@@ -2181,7 +2193,7 @@ function healthHTML(){
     const mo=all.filter(r=>r.granularity==="month").length;
     const regs=l.dim==="region" ? new Set(all.map(r=>r.region)).size : "\u2014";
     return '<tr><td style="font-weight:500">'+esc(l.label)+'</td>'+
-      '<td style="text-align:left;color:var(--muted)">'+esc(l.sheet)+'</td>'+
+      '<td style="text-align:left;color:var(--muted)">'+esc(laneSheet(l))+'</td>'+
       '<td class="num">'+all.length+'</td><td class="num">'+wk+'</td><td class="num">'+mo+'</td>'+
       '<td class="num">'+regs+'</td>'+
       '<td class="num"'+(blanks?' style="color:var(--down);font-weight:600"':'')+'>'+
@@ -2287,7 +2299,7 @@ function loginLogHTML(){
 function footHTML(){
   return '<div class="foot">'+
     '<span>Source: <a href="'+SHEET_URL+'" target="_blank" rel="noopener">Delivery Metrics workbook</a> \u2014 '+
-      esc(lanesOf().map(l=>l.sheet).join(", "))+'</span>'+
+      esc(lanesOf().map(laneSheet).join(", "))+'</span>'+
     '<span>Percentages are 0\u2013100. TAT is in hours.</span>'+
     '<span>Cost / revenue isn\u2019t in these sheets yet.</span></div>';
 }
@@ -2311,6 +2323,11 @@ function wire(){
   });
   document.querySelectorAll("[data-gran]").forEach(b=>b.onclick=()=>{ state.granularity=b.dataset.gran; render(); });
   document.querySelectorAll("[data-seg]").forEach(b=>b.onclick=()=>{ state.segment=b.dataset.seg; render(); });
+  /* 360 Validation Failed mode: switch to the other set of lane sheets, loading them the first time. */
+  document.querySelectorAll("[data-vf]").forEach(b=>b.onclick=()=>{
+    state.includeVF = b.dataset.vf==="1";
+    if(lanesOf().every(l=>state.data[key(l.id)])) render(); else loadAll();
+  });
   document.querySelectorAll("[data-region]").forEach(b=>b.onclick=()=>{
     const r=b.dataset.region;
     if(regSet().has(r)) regSet().delete(r); else regSet().add(r);
