@@ -657,6 +657,7 @@ async function loadSheet(sheet){
       else if(lab==="granularity"||lab==="period_type") o.granularity=normGran(val);
       else if(lab==="period") o.period=val==null?"":String(val);
       else if(lab==="region") o.region=val==null?"Unknown":String(val);
+      else if(lab==="region_set") o.regionSet=val==null?"":String(val);
       else if(lab==="sort_group"||lab==="sort_order") o.group=val;
       else o.v[lab]= (val===""||val==null) ? null : Number(val);
     });
@@ -674,6 +675,7 @@ async function loadAll(){
       allRegions().forEach(r=>regSet().add(r));
       state.regionsInit[state.product]=true;
     }
+    await ensureByRegion();
     state.extras[prod.id]=await loadExtra(prod);
     state.programs=await loadPrograms();
     state.qualities[prod.id]=await loadQuality(prod);
@@ -1255,8 +1257,26 @@ function programsHTML(){
 function lanesOf(){ return (PRODUCTS.find(p=>p.id===state.product)||{lanes:[]}).lanes; }
 function laneById(id){ return lanesOf().find(l=>l.id===id); }
 function rowsFor(laneId){
-  const rows=raw(laneId);
-  return rows.filter(r=>r.granularity===state.granularity).sort(comparePeriods);
+  return laneSetRows(laneId, raw(laneId)).filter(r=>r.granularity===state.granularity).sort(comparePeriods);
+}
+function laneSetRows(laneId, rows){
+  /* VIN/Spin and Rooftop follow the region chips. Images keeps every set of regions in the lane's
+     own sheet (region_set column, one row per set incl. all regions); 360 and Video keep the subsets
+     in a separate <sheet>_byregion tab. */
+  if(laneId!=="region"){
+    const rk=regionKey();
+    if(rows.some(r=>r.regionSet)){
+      if(rk) rows=rows.filter(r=>r.regionSet===rk);
+      else{   /* all regions: the widest set in the sheet */
+        const n=r=>r.regionSet?r.regionSet.split(",").length:0, max=Math.max.apply(null,rows.map(n));
+        rows=rows.filter(r=>n(r)===max);
+      }
+    } else if(rk){
+      const br=state.data[brKey(laneId)];
+      if(br) rows=br.filter(r=>r.regionSet===rk);
+    }
+  }
+  return rows;
 }
 function allRegions(){
   const s=new Set();
@@ -1267,6 +1287,25 @@ function activeRegions(){
   const all=allRegions();
   const sel=all.filter(r=>regSet().has(r));
   return sel.length?sel:all;
+}
+/* Region sets: the VIN/Spin and Rooftop metrics for every combination of regions, keyed by
+   region_set = sorted region names joined by commas (e.g. "AMER,EMEA"). Images has them in the
+   lane's own sheet; 360/Video in <sheet>_byregion. With every region selected, regionKey() is null. */
+function regionKey(){
+  const a=activeRegions(), all=allRegions();
+  return (a.length && a.length<all.length) ? [...a].sort().join(",") : null;
+}
+function brKey(laneId){ return key(laneId)+"@byregion"; }
+/* null = this product's sheet has no region split yet; the lane then stays on all regions. */
+function hasInlineSets(laneId){ return raw(laneId).some(r=>r.regionSet); }
+function regionSplitMissing(laneId){ return laneId!=="region" && !!regionKey() && !hasInlineSets(laneId) && state.data[brKey(laneId)]===null; }
+async function ensureByRegion(){
+  if(!regionKey()) return false;
+  const lanes=lanesOf().filter(l=>l.dim!=="region" && !hasInlineSets(l.id) && state.data[brKey(l.id)]===undefined);
+  if(!lanes.length) return false;
+  const res=await Promise.all(lanes.map(l=>loadSheet(laneSheet(l)+"_byregion").catch(()=>null)));
+  lanes.forEach((l,i)=>{ state.data[brKey(l.id)]=(res[i]&&res[i].length)?res[i]:null; });
+  return true;
 }
 function col(metricId){ return (SEGMENTS.find(s=>s.id===state.segment)||SEGMENTS[0]).prefix+metricId; }
 /* The weekly report runs W-1 (last complete week) to W-4. W-0, the week in
@@ -1962,7 +2001,9 @@ function glanceHTML(){
   lanes.forEach(function(lane){
     html+='<div class="lane-hd"><h3><span class="swatch" style="background:'+lane.color+'"></span>'+
       esc(lane.label)+'</h3><span class="sub">'+esc(lane.blurb)+
-      (lane.id==="region"?' \u00b7 '+activeRegions().length+' of '+allRegions().length:'')+'</span></div>';
+      (lane.id==="region"?' \u00b7 '+activeRegions().length+' of '+allRegions().length
+        : regionKey() ? (regionSplitMissing(lane.id) ? ' \u00b7 all regions (no region split for this sheet yet)'
+                                                     : ' \u00b7 '+esc(activeRegions().join(", "))) : '')+'</span></div>';
   });
   ms.forEach(function(m){
     lanes.forEach(function(lane){
@@ -2138,7 +2179,7 @@ function recordFields(laneId){
 function recordRows(){
   const laneId=state.recordsLane;
   const dim=(laneById(laneId)||{}).dim;
-  let rows=raw(laneId).filter(r=>r.granularity===state.granularity);
+  let rows=laneSetRows(laneId, raw(laneId)).filter(r=>r.granularity===state.granularity);
   if(dim==="region") rows=rows.filter(r=>activeRegions().includes(r.region));
   const q=state.recordsQuery.trim().toLowerCase();
   if(q) rows=rows.filter(r=>(r.period+" "+(r.region||"")).toLowerCase().includes(q));
@@ -2326,19 +2367,22 @@ function wire(){
   /* 360 Validation Failed mode: switch to the other set of lane sheets, loading them the first time. */
   document.querySelectorAll("[data-vf]").forEach(b=>b.onclick=()=>{
     state.includeVF = b.dataset.vf==="1";
-    if(lanesOf().every(l=>state.data[key(l.id)])) render(); else loadAll();
+    if(lanesOf().every(l=>state.data[key(l.id)])){ render(); ensureByRegion().then(loaded=>{ if(loaded) render(); }); }
+    else loadAll();
   });
   document.querySelectorAll("[data-region]").forEach(b=>b.onclick=()=>{
     const r=b.dataset.region;
     if(regSet().has(r)) regSet().delete(r); else regSet().add(r);
     if(state.drillRegion&&!regSet().has(state.drillRegion)) state.drillRegion=null;
     render();
+    ensureByRegion().then(loaded=>{ if(loaded) render(); });
   });
   const ra=document.getElementById("regAll");
   if(ra) ra.onclick=()=>{
     const all=allRegions();
     if(regSet().size===all.length) regSet().clear(); else all.forEach(r=>regSet().add(r));
     render();
+    ensureByRegion().then(loaded=>{ if(loaded) render(); });
   };
   document.querySelectorAll("[data-tm]").forEach(b=>b.onclick=()=>{ state.trendMetric=b.dataset.tm; render(); });
   document.querySelectorAll("[data-split]").forEach(b=>b.onclick=()=>{ state.trendSplit=b.dataset.split; state.hidden.clear(); render(); });
