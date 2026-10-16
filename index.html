@@ -198,6 +198,25 @@ tbody tr[aria-selected="true"]{background:var(--teal-soft);box-shadow:inset 2px 
 .rsn-dot{opacity:.5}
 .rsn-track{margin-top:6px;height:5px;border-radius:3px;background:var(--panel-sunk);overflow:hidden}
 .rsn-track i{display:block;height:100%;border-radius:3px}
+.pipe-bar{display:flex;height:30px;border-radius:7px;overflow:hidden;gap:2px;margin:6px 0 10px}
+.pipe-bar i{display:block;height:100%;min-width:3px}
+.pipe-leg{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0 0 6px;font-size:12px;color:var(--ink-2)}
+.pipe-leg span{display:inline-flex;align-items:center;gap:6px}
+.pipe-leg .swatch{width:10px;height:10px;border-radius:3px;display:inline-block}
+.pipe-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.ptab{width:100%;min-width:560px;border-collapse:collapse;font-size:12.5px}
+.pipe-card .rcard-hd{flex-wrap:wrap}
+.rgrid.pipe-grid{grid-template-columns:minmax(0,1fr)}
+.ptab th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:500;text-align:right;padding:6px 8px;border-bottom:1px solid var(--hair-strong)}
+.ptab th:first-child,.ptab td:first-child{text-align:left}
+.ptab td{padding:7px 8px;border-bottom:1px solid var(--hair);text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.ptab tr.sub td{color:var(--muted);font-size:12px;padding-top:4px;padding-bottom:4px}
+.ptab tr.sub td:first-child{padding-left:26px}
+.ptab tr.tot td{font-weight:600;color:var(--ink);border-top:1px solid var(--hair-strong);border-bottom:0}
+.ptab .over{color:var(--down);font-weight:600}
+.ptab .peak{font-weight:600;color:var(--ink)}
+.pipe-mix{display:flex;flex-wrap:wrap;gap:6px 22px;margin:12px 0 4px;font-size:12px;color:var(--muted)}
+.pipe-mix b{color:var(--ink-2);font-weight:600}
 .foot{margin-top:34px;padding-top:16px;border-top:1px solid var(--hair-strong);font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 18px}
 .foot a{color:var(--teal)}
 @media (max-width:1080px){.grid2{grid-template-columns:1fr}
@@ -311,6 +330,9 @@ const PRODUCTS = [
       { num:"total_out", den:"total_in", numLabel:"Delivered", denLabel:"Total", pendingNote:true }),
     quality:{ sheet:"image_qs", title:"Quality Chart" },
     incidents:{ sheet:"Image_ff", title:"What affected delivery" },
+    /* Stage-by-stage TAT, last 4 complete weeks (card 13272 -> images_pipeline): one row per
+       period (L4W, W-1..W-4) x segment x region_set. Stages add up to End-to-End per SKU. */
+    pipeline:{ sheet:"images_pipeline", slaHrs:6 },
     lanes:[
       { id:"vin",    label:"VIN",     sheet:"images_vin",    color:"var(--s1)", blurb:"Every vehicle delivered" },
       /* tipUnit: card 13001 counts rooftops in its SLA/TAT columns, not SKUs */
@@ -408,7 +430,8 @@ const state = {
   drillRegion:null, recordsLane:"vin", recordsQuery:"", hidden:new Set(),
   sortCol:null, sortDir:-1,
   data:{}, loading:false, error:null, synced:null, user:null, access:null, denied:false, loginLog:null,
-  cost:null, costError:null, costLatest:null, extras:{}, programs:null, qualities:{}
+  cost:null, costError:null, costLatest:null, extras:{}, programs:null, qualities:{},
+  pipes:{}, pipePeriod:"L4W"
 };
 function isAdmin(){ return !!(state.user && state.user.admin); }
 /* Sheets are cached per product (and per Validation Failed mode on 360), so 360's
@@ -677,6 +700,7 @@ async function loadAll(){
     }
     await ensureByRegion();
     state.extras[prod.id]=await loadExtra(prod);
+    if(prod.pipeline) state.pipes[prod.id]=await loadPipe(prod.pipeline.sheet).catch(()=>null);
     state.programs=await loadPrograms();
     state.qualities[prod.id]=await loadQuality(prod);
     state.costError=null;
@@ -1860,6 +1884,108 @@ function syncSticky(){
   const h=m.offsetHeight;
   if(h!==stickyH){ stickyH=h; document.documentElement.style.setProperty("--mastH", h+"px"); }
 }
+/* ---------- pipeline breakdown ---------- */
+const PIPE_STAGES=[
+  { id:"proc_queue", label:"Processing Queue",         n:"e2e_n",        c:"var(--s5)" },
+  { id:"processing", label:"Processing",               n:"e2e_n",        c:"var(--s1)" },
+  { id:"qc_queue",   label:"QC Queue",                 n:"qc_queue_n",   c:"var(--orange)" },
+  { id:"qc_review",  label:"QC Review (incl. rework)", n:"qc_review_n",  c:"var(--s3)" },
+  { id:"publishing", label:"Publishing",               n:"publishing_n", c:"var(--s2)" },
+  { id:"other",      label:"Other",                    n:null,           c:"var(--hair-strong)" }
+];
+const PIPE_SEG={ all:"All", ent:"Ent", mid:"Mid", resellers:"Resellers", smb:"SMB" };
+async function loadPipe(sheet){
+  const t=await fetchTable(sheet);
+  const labels=t.cols.map(c=>String(c.label||"").trim());
+  return t.rows.map(r=>{
+    const o={};
+    labels.forEach((l,i)=>{ const c=r.c&&r.c[i]; o[l]=c&&c.v!=null&&c.v!=="" ? c.v : null; });
+    return o;
+  }).filter(o=>o.period);
+}
+/* Rows for the current segment and region chips; all regions = the widest region_set. */
+function pipeRows(){
+  const rows=(state.pipes[state.product]||[]).filter(r=>r.segment===PIPE_SEG[state.segment]);
+  const rk=regionKey();
+  if(rk) return rows.filter(r=>r.region_set===rk);
+  const n=r=>r.region_set?String(r.region_set).split(",").length:0, max=Math.max.apply(null,rows.map(n));
+  return rows.filter(r=>n(r)===max);
+}
+/* Monday-start weeks, W-1 = last complete week (same as the cards). */
+function pipeRange(per){
+  const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-((d.getDay()+6)%7));
+  const f=x=>x.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
+  const k=per==="L4W"?4:parseInt(String(per).slice(2),10);
+  const a=new Date(d); a.setDate(a.getDate()-7*k);
+  const b=new Date(d); b.setDate(b.getDate()-(per==="L4W"?1:7*(k-1)+1));
+  return f(a)+" – "+f(b);
+}
+function pipeHTML(){
+  const prod=curProduct(); if(!prod.pipeline) return "";
+  const sla=prod.pipeline.slaHrs;
+  const head='<div class="sec"><h2>Pipeline breakdown</h2><div class="seg">'+
+    ["W-4","W-3","W-2","W-1","L4W"].map(p=>'<button data-pp="'+p+'" aria-pressed="'+(state.pipePeriod===p)+'">'+
+      (p==="L4W"?"Last 4 weeks":p)+'</button>').join("")+'</div>'+
+    '<span class="note">'+esc(pipeRange(state.pipePeriod))+' · complete weeks · follows the segment and region filters</span></div>';
+  const data=state.pipes[state.product];
+  if(data===null || (data && !data.length))
+    return head+'<div class="state"><p>The <code>'+esc(prod.pipeline.sheet)+'</code> tab couldn’t be read.</p></div>';
+  if(!data) return "";
+  const rows=pipeRows(), r=rows.find(x=>x.period===state.pipePeriod);
+  if(!r || !r.e2e_n) return head+'<div class="state"><p>No delivered SKUs for this selection.</p></div>';
+  const h=v=>v==null?"—":(+v).toFixed(2)+"h", n=v=>(v==null?0:+v).toLocaleString("en-IN");
+  const pc=v=>v==null?"—":(+v).toFixed(1)+"%";
+  const over=v=>v!=null&&+v>sla?' class="over"':'';
+
+  const bar=PIPE_STAGES.map(s=>{
+    const sh=Math.max(0,+r[s.id+"_share_pct"]||0); if(!sh) return "";
+    const tip='<b>'+esc(s.label)+'</b><br>'+pc(sh)+' of End-to-End time · avg '+h(r[s.id+"_avg_hrs"])+
+      (s.n?'<br>'+n(r[s.n])+' SKUs':'');
+    return '<i class="pt" style="flex:'+sh+';background:'+s.c+'" data-tip="'+esc(tip)+'"></i>';
+  }).join("");
+  const leg=PIPE_STAGES.map(s=>'<span><i class="swatch" style="background:'+s.c+'"></i>'+esc(s.label)+
+    ' <b class="num">'+pc(r[s.id+"_share_pct"])+'</b></span>').join("");
+
+  const row=(lab,p90,p95,p99,avg,sh,cnt,cls)=>'<tr'+(cls?' class="'+cls+'"':'')+'><td>'+lab+'</td>'+
+    '<td>'+h(p90)+'</td><td'+over(p95)+'>'+h(p95)+'</td><td'+over(p99)+'>'+h(p99)+'</td>'+
+    '<td>'+h(avg)+'</td><td>'+(sh===undefined?"":pc(sh))+'</td><td>'+(cnt==null?"":n(cnt))+'</td></tr>';
+  let body="";
+  PIPE_STAGES.forEach(s=>{
+    if(s.id==="other"){ body+=row(esc(s.label),null,null,null,r.other_avg_hrs,r.other_share_pct,null); return; }
+    body+=row(esc(s.label),r[s.id+"_p90_hrs"],r[s.id+"_p95_hrs"],r[s.id+"_p99_hrs"],r[s.id+"_avg_hrs"],r[s.id+"_share_pct"],r[s.n]);
+    if(s.id==="publishing"){
+      body+=row("via FTP / partner publish",null,r.publishing_ftp_p95_hrs,r.publishing_ftp_p99_hrs,r.publishing_ftp_avg_hrs,undefined,r.delivered_ftp_n,"sub");
+      body+=row("via API webhook",null,r.publishing_api_p95_hrs,r.publishing_api_p99_hrs,r.publishing_api_avg_hrs,undefined,r.delivered_api_n,"sub");
+    }
+  });
+  body+=row("End-to-End",r.e2e_p90_hrs,r.e2e_p95_hrs,r.e2e_p99_hrs,r.e2e_avg_hrs,100,r.e2e_n,"tot");
+  const tot=+r.e2e_n||1, mix=[["FTP / partner publish",r.delivered_ftp_n],["API webhook",r.delivered_api_n],["At QC done (no push)",r.delivered_qc_done_n]]
+    .map(m=>'<span>'+m[0]+' <b class="num">'+n(m[1])+'</b> ('+(100*(+m[1]||0)/tot).toFixed(1)+'%)</span>').join("");
+
+  /* P95 by stage, week by week */
+  const weeks=["W-4","W-3","W-2","W-1"], wk=weeks.map(w=>rows.find(x=>x.period===w)||{});
+  const trows=PIPE_STAGES.filter(s=>s.id!=="other").concat([{id:"e2e",label:"End-to-End"}]).map(s=>{
+    const vals=wk.map(x=>x[s.id+"_p95_hrs"]), mx=Math.max.apply(null,vals.map(v=>v==null?-1:+v));
+    return '<tr'+(s.id==="e2e"?' class="tot"':'')+'><td>'+esc(s.label)+'</td>'+vals.map(v=>
+      '<td class="'+(v!=null&&+v>sla?"over":(v!=null&&+v===mx&&s.id!=="e2e"?"peak":""))+'">'+h(v)+'</td>').join("")+'</tr>';
+  }).join("");
+
+  return head+'<div class="rgrid pipe-grid">'+
+    '<section class="rcard pipe-card"><div class="rcard-hd"><h3>Where the time goes</h3>'+
+      '<span class="rcard-rate num">'+h(r.e2e_p95_hrs)+' <span style="font-size:12px;color:var(--muted);font-weight:450">End-to-End P95</span></span></div>'+
+      '<div class="rcard-sub"><span>Share of total End-to-End hours</span><span>'+n(r.e2e_n)+' delivered SKUs</span></div>'+
+      '<div class="pipe-bar">'+bar+'</div><div class="pipe-leg">'+leg+'</div>'+
+      '<div class="pipe-scroll"><table class="ptab" style="margin-top:14px"><tr><th>Stage</th><th>P90</th><th>P95</th><th>P99</th><th>Avg</th><th>Share</th><th>SKUs</th></tr>'+body+'</table></div>'+
+      '<div class="pipe-mix"><span>Delivered by</span>'+mix+'</div>'+
+      '<p class="note" style="font-size:11.5px;color:var(--muted);margin:6px 0 8px">Each SKU’s stages add up to its End-to-End TAT (processing start → delivery). '+
+      'QC stages cover QC’d SKUs, Publishing covers pushed SKUs; values over '+sla+'h are red.</p></section>'+
+    (state.pipePeriod==="L4W" ? '<section class="rcard"><div class="rcard-hd"><h3>P95 by stage, week by week</h3></div>'+
+      '<div class="rcard-sub"><span>Bold = the worst week for that stage</span><span>hours</span></div>'+
+      '<div class="pipe-scroll"><table class="ptab"><tr><th>Stage</th>'+weeks.map(w=>'<th>'+w+'<br><span style="text-transform:none;letter-spacing:0">'+esc(pipeRange(w))+'</span></th>').join("")+'</tr>'+trows+'</table></div>'+
+      '<div style="height:8px"></div></section>' : '')+
+    '</div>';
+}
+
 function render(){
   renderTabs();
   renderSync();
@@ -1898,6 +2024,7 @@ function render(){
   main.innerHTML =
     controlsHTML() +
     glanceHTML() +
+    pipeHTML() +
     qualityHTML() +
     extraHTML() +
     incidentsHTML() +
@@ -2364,6 +2491,7 @@ function wire(){
   });
   document.querySelectorAll("[data-gran]").forEach(b=>b.onclick=()=>{ state.granularity=b.dataset.gran; render(); });
   document.querySelectorAll("[data-seg]").forEach(b=>b.onclick=()=>{ state.segment=b.dataset.seg; render(); });
+  document.querySelectorAll("[data-pp]").forEach(b=>b.onclick=()=>{ state.pipePeriod=b.dataset.pp; render(); });
   /* 360 Validation Failed mode: switch to the other set of lane sheets, loading them the first time. */
   document.querySelectorAll("[data-vf]").forEach(b=>b.onclick=()=>{
     state.includeVF = b.dataset.vf==="1";
