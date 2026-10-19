@@ -642,6 +642,7 @@ function parseGviz(text){
 }
 function normGran(v){
   const g=String(v==null?"":v).trim().toLowerCase();
+  if(/^da(y|ily)/.test(g)) return "day";   /* "day" and "daily" */
   if(g.indexOf("week")===0) return "week";
   if(g.indexOf("month")===0) return "month";
   return g;
@@ -650,9 +651,9 @@ function normGran(v){
    still read oldest-to-newest instead of however the rows happen to sit. */
 function periodRank(p){
   const t=String(p==null?"":p).trim();
-  const m=/^([MWQY])-(\d+)$/i.exec(t);
+  const m=/^([MWDQY])-(\d+)$/i.exec(t);
   if(m) return -parseInt(m[2],10);
-  if(/^(MTD|WTD|QTD|YTD)$/i.test(t)) return 0;
+  if(/^(MTD|WTD|DTD|QTD|YTD)$/i.test(t)) return 0;
   return null;
 }
 function comparePeriods(a,b){
@@ -898,10 +899,16 @@ bucketed AS (
          DATE_DIFF(DATE_TRUNC(CURRENT_DATE(),WEEK(MONDAY)), DATE_TRUNC(work_date,WEEK(MONDAY)), WEEK) + ${wOff},
          work_date, product, region, segment, images, cost, unpriced_images
   FROM priced
+  UNION ALL
+  SELECT 'day',
+         DATE_DIFF(CURRENT_DATE(), work_date, DAY),
+         work_date, product, region, segment, images, cost, unpriced_images
+  FROM priced
 )
 SELECT period_type,
        CASE WHEN period_type='month' AND idx=0 THEN 'MTD'
             WHEN period_type='month' THEN FORMAT('M-%d', idx)
+            WHEN period_type='day' THEN FORMAT('D-%d', idx)
             ELSE FORMAT('W-%d', idx) END AS period,
        product, region, segment,
        ROUND(SUM(cost),2) AS cost,
@@ -911,6 +918,7 @@ SELECT period_type,
 FROM bucketed
 WHERE (period_type='month' AND idx BETWEEN 0 AND 5)
    OR (period_type='week'  AND idx BETWEEN 1 AND 4)
+   OR (period_type='day'   AND idx BETWEEN 1 AND 7)
 GROUP BY period_type, period, product, region, segment`;
 }
 
@@ -1334,7 +1342,7 @@ async function ensureByRegion(){
 function col(metricId){ return (SEGMENTS.find(s=>s.id===state.segment)||SEGMENTS[0]).prefix+metricId; }
 /* The weekly report runs W-1 (last complete week) to W-4. W-0, the week in
    progress, is dropped wherever it turns up. */
-function isShownPeriod(p){ return String(p).trim().toUpperCase()!=="W-0"; }
+function isShownPeriod(p){ const u=String(p).trim().toUpperCase(); return u!=="W-0" && u!=="D-0"; }
 function periodsOf(){
   const ls=lanesOf(), a=ls[0]?rowsFor(ls[0].id):[], b=ls[1]?rowsFor(ls[1].id):[];
   const src=a.length?a:b;
@@ -2041,6 +2049,8 @@ function renderTabs(){
       esc(p.label)+'<span class="tag">'+(p.status==="live"?"Live":"Soon")+'</span></button>').join("");
   document.querySelectorAll("[data-prod]").forEach(b=>b.onclick=()=>{
     state.product=b.dataset.prod;
+    /* Daily only exists on Video; leaving it falls back to Weekly. */
+    if(state.granularity==="day" && state.product!=="video") state.granularity="week";
     const p=PRODUCTS.find(x=>x.id===state.product);
     const first=p&&p.lanes[0];
     const needSheets=p&&p.status==="live"&&first&&!state.data[key(first.id)];
@@ -2076,6 +2086,8 @@ function controlsHTML(){
   const regs=allRegions();
   return '<div class="controls">'+
     '<div class="ctl"><span>Period</span><div class="seg">'+
+      /* Daily is Video-only for now - only the video sheets carry period_type=Daily rows. */
+      (state.product==="video" ? '<button data-gran="day" aria-pressed="'+(state.granularity==="day")+'">Daily</button>' : '')+
       '<button data-gran="week"  aria-pressed="'+(state.granularity==="week")+'">Weekly</button>'+
       '<button data-gran="month" aria-pressed="'+(state.granularity==="month")+'">Monthly</button>'+
     '</div></div>'+
@@ -2357,12 +2369,13 @@ function healthHTML(){
     all.forEach(r=>SEGMENTS.forEach(sg=>cols.forEach(c=>{
       cells++; const v=r.v[sg.prefix+c]; if(v==null||isNaN(v)) blanks++;
     })));
+    const dy=all.filter(r=>r.granularity==="day").length;
     const wk=all.filter(r=>r.granularity==="week").length;
     const mo=all.filter(r=>r.granularity==="month").length;
     const regs=l.dim==="region" ? new Set(all.map(r=>r.region)).size : "\u2014";
     return '<tr><td style="font-weight:500">'+esc(l.label)+'</td>'+
       '<td style="text-align:left;color:var(--muted)">'+esc(laneSheet(l))+'</td>'+
-      '<td class="num">'+all.length+'</td><td class="num">'+wk+'</td><td class="num">'+mo+'</td>'+
+      '<td class="num">'+all.length+'</td><td class="num">'+dy+'</td><td class="num">'+wk+'</td><td class="num">'+mo+'</td>'+
       '<td class="num">'+regs+'</td>'+
       '<td class="num"'+(blanks?' style="color:var(--down);font-weight:600"':'')+'>'+
         blanks+(cells?' <span style="color:var(--muted);font-weight:400">of '+cells+'</span>':'')+'</td></tr>';
@@ -2409,7 +2422,7 @@ function healthHTML(){
       }).join("");
     const absent=onScreen.filter(p=>!cover[state.granularity+"|"+p]);
     costDims='<div class="sec"><h2>Cost coverage<span class="admin-tag">Admin</span></h2>'+
-      '<span class="note">'+esc(state.product)+' \u00b7 '+esc(state.granularity)+'ly, before segment and region filters'+
+      '<span class="note">'+esc(state.product)+' \u00b7 '+esc(state.granularity==="day"?"daily":state.granularity+"ly")+', before segment and region filters'+
       (absent.length?' \u00b7 nothing returned for '+esc(absent.join(", ")):'')+'</span></div>'+
       '<div class="panel" style="margin-bottom:18px"><div class="scroll"><table class="records">'+
       '<tr><th style="text-align:left">Period</th><th>Rows</th><th>Images</th><th>Cost</th>'+
@@ -2428,7 +2441,7 @@ function healthHTML(){
     '<div class="panel" style="margin-bottom:18px"><div class="panel-hd" style="margin:0">'+
       '<h3>Access</h3><span class="note">'+esc(acc)+'</span></div></div>'+
     '<div class="panel"><div class="scroll" style="max-height:none"><table class="records">'+
-    '<tr><th>Cut</th><th style="text-align:left">Sheet</th><th>Rows</th><th>Weekly</th><th>Monthly</th><th>Regions</th><th>Blank cells</th></tr>'+
+    '<tr><th>Cut</th><th style="text-align:left">Sheet</th><th>Rows</th><th>Daily</th><th>Weekly</th><th>Monthly</th><th>Regions</th><th>Blank cells</th></tr>'+
     '<tbody>'+rows+'</tbody></table></div></div>';
 }
 
