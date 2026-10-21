@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;450;500;600;700&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="engine-360.js"></script>
 <style>
 :root{
   --canvas:#ECEFEE; --panel:#FFFFFF; --panel-sunk:#F4F6F5;
@@ -77,6 +78,15 @@ select.inp{background:var(--panel);border:1px solid var(--hair-strong);border-ra
 .sec-tools{margin-left:auto;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .chip[aria-pressed="true"]{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:500}
 .linky{background:none;border:0;color:var(--teal);font-size:12.5px;text-decoration:underline;padding:0}
+/* Source dropdown (360), the same control as the 360 dashboard's Reports tab */
+.msel{position:relative}
+.msel-btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--hair-strong);background:var(--panel);border-radius:7px;padding:5px 10px;font-size:13px;color:var(--ink-2);min-width:150px;justify-content:space-between;cursor:pointer}
+.msel-btn svg{flex:0 0 auto;opacity:.7}
+.msel-pill{font-size:11px;background:var(--panel-sunk);border:1px solid var(--hair-strong);border-radius:999px;padding:0 6px;margin-left:4px;color:var(--muted)}
+.msel-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;background:var(--panel);border:1px solid var(--hair-strong);border-radius:10px;box-shadow:0 8px 24px rgba(12,46,44,.16);padding:8px;min-width:210px}
+.msel-acts{display:flex;gap:14px;padding:2px 4px 8px;margin-bottom:4px;border-bottom:1px solid var(--hair-strong)}
+.msel-pop label{display:flex;align-items:center;gap:8px;padding:5px 4px;font-size:13px;color:var(--ink-2);cursor:pointer;border-radius:6px}
+.msel-pop label:hover{background:var(--panel-sunk)}
 
 /* ---------- section headings ---------- */
 .sec{margin:30px 0 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
@@ -272,6 +282,7 @@ const SHEET_ID = "16vFElbOV8Awd63R6-WlsNdAScWNE18xGUPFkzE0GN7c";
    re-pasting anything. If config.json is missing, the values below are used.
    NOTE: this gates the UI. It is not a security boundary - the file is public
    and the sheets stay link-readable. Don't treat it as access control.        */
+const STAGING          = false;
 const CONFIG_FILE      = "config.json";
 let   GOOGLE_CLIENT_ID = "";
 let   ALLOWED_DOMAINS  = ["spyne.ai","spyne.co.in"];
@@ -299,6 +310,9 @@ let   ACCESS_CONTACT   = "praveen@spyne.ai";       // where access requests are 
      }
    Leave it out and the logging simply doesn't run.                            */
 let   LOGIN_LOG        = null;
+/* 360 from the 360 Tracker dashboard's raw data (see the 360 product below). Set "raw360": false
+   in config.json to put the 360 tab back on the Google Sheet tabs without touching this file. */
+let   RAW360           = true;
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit";
 
 /* agg says how a metric combines across regions: "mean" for rates (the default),
@@ -339,22 +353,26 @@ const PRODUCTS = [
       { id:"rt",     label:"Rooftop", sheet:"images_rt",     color:"var(--s2)", blurb:"Rolled up per dealership", tipUnit:"rooftops" },
       { id:"region", label:"Region",  sheet:"images_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
-  /* 360 reads the <sheet>_vf twins (360-tracker-dashboard sync-sheets.js), which keep Validation
-     Failed spins in Total and Fulfilment — the same numbers as the 360 dashboard's Reports tab.
-     SLA and TAT take delivered spins only, so they are the same in both twins. No chip
-     (removed 2026-10-21); the plain sheets (VF left out) are still written. */
-  { id:"spin", label:"360", status:"live",
+  /* 360 is computed in the browser from the 360 Tracker dashboard's own data (/data/<YYYY-MM>.json)
+     with engine-360.js, a copy of that dashboard's Reports-tab calculation, so every filter works on
+     the raw spins (Period incl. Daily, Segment, Regions, Input Type, Source) and the numbers match the
+     Reports tab. The data is served only to emails on the 360 dashboard's allow-list (Google sign-in
+     token, checked by its middleware). With "raw360": false in config.json the tab reads the sheets
+     named below instead (the <sheet>_vf twins, Validation Failed included) — the revert path.
+     Quality Chart and incidents always come from the sheet. Images and Video never use raw data. */
+  { id:"spin", label:"360", status:"live", raw:{ base:"https://360-tracker-dashboard.vercel.app" },
     metrics:mkMetrics("delivery_pct","Fulfilment","Cost / spin",6,
       { num:"total_delivered", den:"total_vin", numLabel:"Delivered", denLabel:"Total" }),
     quality:{ sheet:"360_qs", title:"Quality Chart" },
     incidents:{ sheet:"360_ff", title:"What affected delivery" },
-    /* All three read 360_issue and split on its category column. */
+    /* Raw: computed from the spins for the latest period, following every filter.
+       Sheet (revert): 360_issue, split on its category column. */
     panels:[
-      { sheet:"360_issue", cat:"QC Failed", title:"QC Failed reasons",
+      { sheet:"360_issue", raw:true, cat:"QC Failed", title:"QC Failed reasons",
         subtitle:"Blocker severity issues", tone:"red", kind:"reasons", pctWhole:true },
-      { sheet:"360_issue", cat:"Validation Failed", title:"Validation Failed reasons",
+      { sheet:"360_issue", raw:true, cat:"Validation Failed", title:"Validation Failed reasons",
         subtitle:"Failure reasons", tone:"red", kind:"reasons", pctWhole:true },
-      { sheet:"360_issue", cat:"Tech & AI Failure", title:"Tech & AI Failure reasons",
+      { sheet:"360_issue", raw:true, cat:"Tech & AI Failure", title:"Tech & AI Failure reasons",
         subtitle:"Failure reasons", tone:"amber", kind:"reasons", pctWhole:true }
     ],
     lanes:[
@@ -432,8 +450,55 @@ const state = {
   sortCol:null, sortDir:-1,
   data:{}, loading:false, error:null, synced:null, user:null, access:null, denied:false, loginLog:null,
   cost:null, costError:null, costLatest:null, extras:{}, programs:null, qualities:{},
-  pipes:{}, pipePeriod:"L4W"
+  pipes:{}, pipePeriod:"L4W",
+  rawRows:{}, rawTypes:{}, rawSources:{}, rawSynced:null, srcOpen:false
 };
+/* ---------- 360 from raw data (engine-360.js) ---------- */
+function rawOn(prod){ return !!(prod && prod.raw) && RAW360 && !!window.Engine360; }
+function isRaw(){ return rawOn(curProduct()); }
+function rawAll(field){ return Engine360.values(state.rawRows[state.product]||[], field); }
+function rawFilters(){
+  const types=state.rawTypes[state.product], srcs=state.rawSources[state.product];
+  return {
+    types:   (types && types.size<rawAll('type').length) ? types : null,
+    sources: (srcs && srcs.size<rawAll('source').length) ? srcs : null,
+    regions: regionKey() ? new Set(activeRegions()) : null,
+  };
+}
+/* Same wording as the Reports tab when a filter leaves nothing to show. */
+function rawNothingSelected(){
+  const t=state.rawTypes[state.product], s=state.rawSources[state.product];
+  if(t && !t.size) return "No input type selected \u2014 click Images or Video.";
+  if(s && !s.size) return "No source selected \u2014 tick at least one source, or use Select all in the Source dropdown.";
+  return null;
+}
+/* Recompute the three lanes from the raw rows with the current filters. */
+function computeRaw(){
+  const rows=state.rawRows[state.product];
+  if(!rows) return;
+  const out=Engine360.compute(rows, rawFilters());
+  state.data[key("spin")]=out.spin; state.data[key("rt")]=out.rt; state.data[key("region")]=out.region;
+}
+async function loadRaw(prod){
+  const tok=(function(){ try{ return sessionStorage.getItem("dm_cred"); }catch(e){ return null; } })();
+  const opts={ headers:{ "X-Google-Id-Token": tok||"" }, cache:"no-store" };
+  const get=async function(path){
+    const r=await fetch(prod.raw.base+"/data/"+path+"?_="+Date.now(), opts);
+    if(r.status===403) throw new Error("NO_ACCESS");
+    if(r.status===401) throw new Error("SIGN_IN");
+    if(!r.ok) throw new Error("HTTP "+r.status+" reading "+path);
+    return r.json();
+  };
+  const idx=await get("index.json");
+  const months=(idx.months||[]).map(m=>typeof m==="string"?m:(m.key||m.month||m.id)).filter(Boolean);
+  const parts=await Promise.all(months.map(m=>get(m+".json")));
+  const rows=[]; parts.forEach(p=>{ if(p&&p.rows) rows.push.apply(rows,p.rows); });
+  Engine360.prepare(rows);
+  state.rawRows[prod.id]=rows;
+  if(!state.rawTypes[prod.id]) state.rawTypes[prod.id]=new Set(Engine360.values(rows,'type'));
+  if(!state.rawSources[prod.id]) state.rawSources[prod.id]=new Set(Engine360.values(rows,'source'));
+  state.rawSynced=idx.lastSynced?new Date(idx.lastSynced):null;
+}
 function isAdmin(){ return !!(state.user && state.user.admin); }
 /* Sheets are cached per product (and per Validation Failed mode on 360), so 360's
    rooftop rows never overwrite images', and the two 360 modes never mix. */
@@ -451,6 +516,7 @@ function regSet(){
 /* Fire-and-forget: a Google Form accepts a cross-origin POST but answers
    opaquely, so we can't confirm it landed. Never block sign-in on it. */
 function logSignIn(user){
+  if(STAGING) return;   /* test sign-ins stay out of the login log */
   if(!LOGIN_LOG || !LOGIN_LOG.formUrl || !LOGIN_LOG.fields) return;
   try{
     const body=new URLSearchParams();
@@ -478,6 +544,7 @@ async function loadConfig(){
     if(c && typeof c.contact==="string" && c.contact.trim()) ACCESS_CONTACT=c.contact.trim();
     if(c && c.loginLog && c.loginLog.formUrl && c.loginLog.fields) LOGIN_LOG=c.loginLog;
     if(c && c.cost && c.cost.project && c.cost.dataset) COST=c.cost;
+    if(c && c.raw360===false) RAW360=false;
   }catch(e){ /* keep defaults */ }
 }
 function decodeJwt(tok){
@@ -643,7 +710,7 @@ function parseGviz(text){
 }
 /* Products whose lane sheets carry day rows. 360 has none yet. */
 const DAILY_PRODUCTS = ["images","video"];
-function hasDaily(){ return DAILY_PRODUCTS.indexOf(state.product)>=0; }
+function hasDaily(){ return DAILY_PRODUCTS.indexOf(state.product)>=0 || isRaw(); }   /* raw 360 has days too */
 function normGran(v){
   const g=String(v==null?"":v).trim().toLowerCase();
   if(/^da(y|ily)/.test(g)) return "day";   /* "day" and "daily" */
@@ -698,11 +765,17 @@ async function loadAll(){
   if(!prod||prod.status!=="live"||!prod.lanes.length) return;
   state.loading=true; state.error=null; render();
   try{
-    const results=await Promise.all(prod.lanes.map(l=>loadSheet(laneSheet(l))));
-    prod.lanes.forEach((l,i)=>{ state.data[key(l.id)]=results[i]; });
+    if(rawOn(prod)){
+      await loadRaw(prod);
+      computeRaw();
+    } else {
+      const results=await Promise.all(prod.lanes.map(l=>loadSheet(laneSheet(l))));
+      prod.lanes.forEach((l,i)=>{ state.data[key(l.id)]=results[i]; });
+    }
     if(!state.regionsInit[state.product]){
       allRegions().forEach(r=>regSet().add(r));
       state.regionsInit[state.product]=true;
+      if(rawOn(prod)) computeRaw();
     }
     await ensureByRegion();
     state.extras[prod.id]=await loadExtra(prod);
@@ -715,11 +788,16 @@ async function loadAll(){
     if(state.cost) state.cost.forEach(function(r){
       if(r.latest && (!state.costLatest || r.latest>state.costLatest)) state.costLatest=r.latest;
     });
-    state.synced=new Date();
+    state.synced=(rawOn(prod) && state.rawSynced) ? state.rawSynced : new Date();
     if(isAdmin() && LOGIN_LOG && LOGIN_LOG.sheetName){
       try{ state.loginLog=await loadLoginLog(); }catch(e){ state.loginLog=null; }
     }
-  }catch(err){ state.error=err.message||String(err); }
+  }catch(err){
+    const m=err.message||String(err);
+    state.error = m==="NO_ACCESS" ? "Your account isn\u2019t on the 360 Tracker dashboard\u2019s access list, so its 360 data can\u2019t be shown here. Ask the 360 dashboard owner to add you."
+                : m==="SIGN_IN"   ? "Your sign-in has expired for the 360 data. Sign out and sign in again."
+                : m;
+  }
   state.loading=false; render();
 }
 
@@ -1002,7 +1080,7 @@ async function loadExtra(prod){
   const out={};
   const seen={};
   const unique=all.filter(function(p){
-    if(!p.sheet || seen[p.sheet]) return false;
+    if((p.raw && rawOn(prod)) || !p.sheet || seen[p.sheet]) return false;
     seen[p.sheet]=true; return true;
   });
   await Promise.all(unique.map(async function(p){
@@ -1057,8 +1135,18 @@ function extraHTML(){
   const periodsNow=periodsOf();
   const latestPeriod=periodsNow.length?periodsNow[periodsNow.length-1]:null;
   let filtered=false;
+  const rawIss = (rawOn(prod) && latestPeriod && state.rawRows[prod.id])
+    ? Engine360.issues(state.rawRows[prod.id], rawFilters(), latestPeriod, state.granularity, state.segment) : null;
   const cards=prod.panels.map(function(p){
     let rows = p.rows || (state.extras[state.product] && state.extras[state.product][p.sheet]) || null;
+    if(p.raw && rawOn(prod)){
+      if(!rawIss) return "";
+      const map = p.cat==="QC Failed" ? rawIss.qcReasons : p.cat==="Validation Failed" ? rawIss.valReasons : rawIss.techReasons;
+      const base = rawIss.totalReviewed || 0;
+      rows = Object.entries(map).sort((a,b)=>b[1]-a[1]).map(([label,count])=>({ pt:state.granularity, p:latestPeriod, cat:p.cat,
+        label:label, count:count, pct: base ? count/base : null }));
+      if(!rows.length) rows=[{ pt:state.granularity, p:"\u2014none\u2014", cat:p.cat, label:"", count:0, pct:null }];
+    }
     if(!rows) return "";
 
     if(p.kind==="table"){
@@ -1125,7 +1213,7 @@ function extraHTML(){
   if(!cards.replace(/\s/g,"")) return "";
   return '<div class="sec"><h2>Fulfilment Gap Reasons</h2>'+
     '<span class="note">'+(filtered
-      ? esc(periodName(latestPeriod||""))+' \u00b7 follows the period filter'
+      ? esc(periodName(latestPeriod||""))+(rawOn(prod)?' \u00b7 follows every filter above':' \u00b7 follows the period filter')
       : 'Fixed \u2014 not affected by the filters above')+'</span></div>'+
     '<div class="rgrid" style="--cols:'+Math.max(1,shown)+'">'+cards+'</div>';
 }
@@ -1297,6 +1385,7 @@ function rowsFor(laneId){
   return laneSetRows(laneId, raw(laneId)).filter(r=>r.granularity===state.granularity).sort(comparePeriods);
 }
 function laneSetRows(laneId, rows){
+  if(isRaw()) return rows;   /* raw: the lanes are recomputed for the selected regions */
   /* VIN/Spin and Rooftop follow the region chips. Images keeps every set of regions in the lane's
      own sheet (region_set column, one row per set incl. all regions); 360 and Video keep the subsets
      in a separate <sheet>_byregion tab. */
@@ -1335,8 +1424,9 @@ function regionKey(){
 function brKey(laneId){ return key(laneId)+"@byregion"; }
 /* null = this product's sheet has no region split yet; the lane then stays on all regions. */
 function hasInlineSets(laneId){ return raw(laneId).some(r=>r.regionSet); }
-function regionSplitMissing(laneId){ return laneId!=="region" && !!regionKey() && !hasInlineSets(laneId) && state.data[brKey(laneId)]===null; }
+function regionSplitMissing(laneId){ if(isRaw()) return false; return laneId!=="region" && !!regionKey() && !hasInlineSets(laneId) && state.data[brKey(laneId)]===null; }
 async function ensureByRegion(){
+  if(isRaw()) return false;
   if(!regionKey()) return false;
   const lanes=lanesOf().filter(l=>l.dim!=="region" && !hasInlineSets(l.id) && state.data[brKey(l.id)]===undefined);
   if(!lanes.length) return false;
@@ -2032,12 +2122,14 @@ function render(){
   if(!laneById(state.matrixLane))  state.matrixLane=lanesOf()[0].id;
   if(!laneById(state.recordsLane)){ state.recordsLane=lanesOf()[0].id; state.sortCol=null; }
   if(state.loading && !raw(lanesOf()[0].id).length){
-    main.innerHTML='<div class="state" style="margin-top:32px"><h3>Pulling the workbook</h3><p>Reading images_vin, images_rt and images_region.</p></div>';
+    main.innerHTML = isRaw()
+      ? '<div class="state" style="margin-top:32px"><h3>Reading the 360 data</h3><p>Loading every spin from the 360 Tracker dashboard and working out the numbers \u2014 this takes a few seconds.</p></div>'
+      : '<div class="state" style="margin-top:32px"><h3>Pulling the workbook</h3><p>Reading images_vin, images_rt and images_region.</p></div>';
     return;
   }
   if(state.error){
-    main.innerHTML='<div class="state" style="margin-top:32px"><h3>Couldn\u2019t read the sheet</h3><p>'+esc(state.error)+
-      '</p><p style="margin-top:10px">The workbook has to be shared as \u201cAnyone with the link \u2014 Viewer\u201d for this page to read it.</p>'+
+    main.innerHTML='<div class="state" style="margin-top:32px"><h3>'+(isRaw()?'Couldn\u2019t read the 360 data':'Couldn\u2019t read the sheet')+'</h3><p>'+esc(state.error)+
+      '</p>'+(isRaw()?'':'<p style="margin-top:10px">The workbook has to be shared as \u201cAnyone with the link \u2014 Viewer\u201d for this page to read it.</p>')+
       '<button class="btn" id="retryBtn">Try again</button></div>';
     document.getElementById("retryBtn").onclick=loadAll;
     return;
@@ -2046,6 +2138,13 @@ function render(){
   /* The page ends after the fixed panels. Trend, drill-down and the admin
      blocks are still built by the functions below - add them back to this list
      to restore them. */
+  const nothing = isRaw() && rawNothingSelected();
+  if(nothing){
+    main.innerHTML = controlsHTML() +
+      '<div class="state" style="margin-top:16px"><h3>Nothing selected</h3><p>'+esc(nothing)+'</p></div>';
+    wire(); syncSticky();
+    return;
+  }
   main.innerHTML =
     controlsHTML() +
     glanceHTML() +
@@ -2093,7 +2192,7 @@ function renderSync(){
   btn.disabled=state.loading;
   btn.textContent=state.loading?"Refreshing\u2026":"Refresh data";
   if(state.error) el.innerHTML='<span class="dot err"></span>Sheet unreachable';
-  else if(state.loading) el.innerHTML='<span class="dot"></span>Reading the workbook\u2026';
+  else if(state.loading) el.innerHTML='<span class="dot"></span>'+(isRaw()?'Reading the 360 data\u2026':'Reading the workbook\u2026');
   else if(state.synced) el.innerHTML='<span class="dot"></span>Synced '+state.synced.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})+
        ' \u00b7 '+state.synced.toLocaleDateString("en-IN",{day:"numeric",month:"short"});
   else el.innerHTML='<span class="dot"></span>Ready';
@@ -2117,6 +2216,22 @@ function controlsHTML(){
           '<button data-vf="1" aria-pressed="'+state.includeVF+'">Included</button>'+
         '</div></div>'
       : '')+
+    (isRaw() && state.rawRows[state.product] ? (function(){
+      const types=rawAll('type'), srcs=rawAll('source');
+      const tSel=state.rawTypes[state.product], sSel=state.rawSources[state.product];
+      const n=sSel.size, lab = n===0 ? 'No sources selected' : n===srcs.length ? 'All sources'
+        : n===1 ? esc([...sSel][0]||'(blank)') : n+' sources <span class="msel-pill">'+(srcs.length-n)+' hidden</span>';
+      return '<div class="ctl"><span>Input Type</span><div class="chips">'+
+          types.map(t=>'<button class="chip" data-rtype="'+esc(t)+'" aria-pressed="'+tSel.has(t)+'">'+esc(t)+'</button>').join("")+'</div></div>'+
+        '<div class="ctl"><span>Source</span><div class="msel" id="srcMs">'+
+          '<button class="msel-btn" id="srcBtn" aria-haspopup="true" aria-expanded="'+state.srcOpen+'"><span>'+lab+'</span>'+
+            '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="2,4 6,8 10,4"/></svg></button>'+
+          (state.srcOpen ? '<div class="msel-pop" role="dialog" aria-label="Source"><div class="msel-acts">'+
+              '<button class="linky" data-srcact="all">Select all</button><button class="linky" data-srcact="none" style="color:var(--muted)">Clear all</button></div>'+
+              srcs.map(v=>'<label><input type="checkbox" data-rsrc="'+esc(v)+'"'+(sSel.has(v)?' checked':'')+'> '+esc(v||'(blank)')+'</label>').join("")+
+            '</div>' : '')+
+        '</div></div>';
+    })() : '')+
     (COST && !state.cost ? '<div class="ctl"><button class="chip" id="bqBtn"'+
        (state.costError ? ' title="'+esc(state.costError)+'"' : '')+'>'+
        (state.costError ? "Cost unavailable \u2014 retry" : "Connect BigQuery for cost")+'</button>'+
@@ -2496,13 +2611,20 @@ function loginLogHTML(){
 
 function footHTML(){
   return '<div class="foot">'+
-    '<span>Source: <a href="'+SHEET_URL+'" target="_blank" rel="noopener">Delivery Metrics workbook</a> \u2014 '+
-      esc(lanesOf().map(laneSheet).join(", "))+'</span>'+
+    (isRaw()
+      ? '<span>Source: <a href="'+curProduct().raw.base+'" target="_blank" rel="noopener">360 Tracker dashboard</a> data, '+
+          'computed with engine-360.js ('+esc(Engine360.version)+'), the same calculation as its Reports tab</span>'
+      : '<span>Source: <a href="'+SHEET_URL+'" target="_blank" rel="noopener">Delivery Metrics workbook</a> \u2014 '+
+          esc(lanesOf().map(laneSheet).join(", "))+'</span>')+
     '<span>Percentages are 0\u2013100. TAT is in hours.</span>'+
     '<span>Cost / revenue isn\u2019t in these sheets yet.</span></div>';
 }
 
 /* ---------- events ---------- */
+document.addEventListener("click", e=>{
+  if(state.srcOpen && !(e.target.closest && e.target.closest("#srcMs"))){ state.srcOpen=false; render(); }
+});
+document.addEventListener("keydown", e=>{ if(e.key==="Escape" && state.srcOpen){ state.srcOpen=false; render(); } });
 function wire(){
   const bqb=document.getElementById("bqBtn");
   if(bqb) bqb.onclick=async()=>{
@@ -2532,6 +2654,7 @@ function wire(){
     const r=b.dataset.region;
     if(regSet().has(r)) regSet().delete(r); else regSet().add(r);
     if(state.drillRegion&&!regSet().has(state.drillRegion)) state.drillRegion=null;
+    if(isRaw()) computeRaw();
     render();
     ensureByRegion().then(loaded=>{ if(loaded) render(); });
   });
@@ -2539,9 +2662,30 @@ function wire(){
   if(ra) ra.onclick=()=>{
     const all=allRegions();
     if(regSet().size===all.length) regSet().clear(); else all.forEach(r=>regSet().add(r));
+    if(isRaw()) computeRaw();
     render();
     ensureByRegion().then(loaded=>{ if(loaded) render(); });
   };
+  /* 360 raw filters: Input Type capsules and the Source dropdown narrow the spins, then the lanes
+     are recomputed (the dropdown stays open while ticking). */
+  document.querySelectorAll("[data-rtype]").forEach(b=>b.onclick=()=>{
+    const s=state.rawTypes[state.product], t=b.dataset.rtype;
+    if(s.has(t)) s.delete(t); else s.add(t);
+    computeRaw(); render();
+  });
+  const sb=document.getElementById("srcBtn");
+  if(sb) sb.onclick=(e)=>{ e.stopPropagation(); state.srcOpen=!state.srcOpen; render(); };
+  document.querySelectorAll("[data-rsrc]").forEach(cb=>cb.onchange=()=>{
+    const s=state.rawSources[state.product], t=cb.dataset.rsrc;
+    if(cb.checked) s.add(t); else s.delete(t);
+    computeRaw(); render();
+  });
+  document.querySelectorAll("[data-srcact]").forEach(b=>b.onclick=(e)=>{
+    e.stopPropagation();
+    const s=state.rawSources[state.product];
+    if(b.dataset.srcact==="all") rawAll('source').forEach(x=>s.add(x)); else s.clear();
+    computeRaw(); render();
+  });
   document.querySelectorAll("[data-tm]").forEach(b=>b.onclick=()=>{ state.trendMetric=b.dataset.tm; render(); });
   document.querySelectorAll("[data-split]").forEach(b=>b.onclick=()=>{ state.trendSplit=b.dataset.split; state.hidden.clear(); render(); });
   document.querySelectorAll("[data-cmode]").forEach(b=>b.onclick=()=>{ state.colorMode=b.dataset.cmode; render(); });
