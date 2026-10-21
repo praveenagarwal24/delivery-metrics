@@ -1599,7 +1599,11 @@ function periodName(p){
               "W-1":"This week","W-2":"Last week","W-3":"2 weeks back","W-4":"3 weeks back" };
   return map[p]||p;
 }
+/* 360 names: W-1 is the last complete Mon–Sun week (the week in progress is left out), so it is
+   "Last week", not "This week". Images and Video keep periodName. */
+const RAW_WEEK_NAMES = { "W-1":"Last week", "W-2":"2 weeks back", "W-3":"3 weeks back", "W-4":"4 weeks back" };
 function periodLabel(p){
+  if(RAW_WEEK_NAMES[p]) return RAW_WEEK_NAMES[p];
   const d=/^D-(\d+)$/.exec(String(p));
   if(!d) return periodName(p);
   const row=raw(lanesOf()[0].id).find(r=>r.period===p);
@@ -2266,7 +2270,7 @@ function glanceHTML(){
   const lanes=lanesOf(), ms=metricsOf().filter(m=>!state.hiddenCards.has(m.id));
 
   let html='<div class="sec"><h2>At a glance</h2><span class="note">'+
-    esc(periodName(latest))+' \u00b7 '+esc(segLabel)+' \u00b7 change is against the period before it'+
+    esc(isRaw()?periodLabel(latest):periodName(latest))+' \u00b7 '+esc(segLabel)+' \u00b7 change is against the period before it'+
     (state.costLatest ? ' \u00b7 <b style="color:var(--warn)">cost data only to '+
        esc(new Date(state.costLatest+"T00:00:00").toLocaleDateString("en-IN",{day:"numeric",month:"short"}))+
        '</b>' : '')+'</span>'+
