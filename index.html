@@ -309,14 +309,15 @@ const SHEET_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit"
    population, bad the part that missed. A sheet without them shows the value only. */
 function mkMetrics(lastId,lastLabel,costLabel,slaHrs,combo){
   const h=slaHrs||6;
-  /* total = the fulfilment total; SKUs in it but not in the SLA total were received under 6h ago and not yet judged (MTD only). */
-  const slaTip={ n:"sla_checked", bad:"sla_breached", total:(combo&&combo.pendingNote)?combo.den:null, nLabel:"Total", goodLabel:"Within SLA", badLabel:"SLA breach" };
+  /* SLA counts delivered units only, the same ones as TAT, so both tooltips share one total. */
+  const slaTip={ n:"sla_checked", bad:"sla_breached", nLabel:"Delivered", goodLabel:"Within SLA", badLabel:"SLA breach" };
   const tatTip={ n:"tat_measured", bad:"tat_over_sla", nLabel:"Measured", goodLabel:"Within "+h+"h", badLabel:"Over "+h+"h" };
+  /* Fulfilment leads: it covers every unit received; SLA and TAT then describe the delivered ones. */
   return [
+    { id:lastId,        label:lastLabel,   kind:"pct", better:"high", combo:combo||null },
     { id:"sla_pct",     label:"SLA < "+h+" hrs", kind:"pct", better:"high", tip:slaTip },
     { id:"p99_tat_hrs", label:"TAT (P99)", kind:"hrs", better:"low", tip:tatTip },
     { id:"p95_tat_hrs", label:"TAT (P95)", kind:"hrs", better:"low", tip:tatTip },
-    { id:lastId,        label:lastLabel,   kind:"pct", better:"high", combo:combo||null },
     /* Cost per unit only. Total cost and volume are still queried - the ratio
        needs both - but neither is offered as a card or chart of its own. */
     { id:"cost_per_image", label:costLabel||"Cost / image", kind:"inr2", better:"low", agg:"ratio", src:"bq" }
@@ -326,8 +327,7 @@ function mkMetrics(lastId,lastLabel,costLabel,slaHrs,combo){
 const PRODUCTS = [
   { id:"images", label:"Images", status:"live",
     metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / image",6,
-      /* pendingNote: SLA total = this total minus SKUs received <6h ago (cards 12998/13000), so the MTD gap can be explained */
-      { num:"total_out", den:"total_in", numLabel:"Delivered", denLabel:"Total", pendingNote:true }),
+      { num:"total_out", den:"total_in", numLabel:"Delivered", denLabel:"Total" }),
     quality:{ sheet:"image_qs", title:"Quality Chart" },
     incidents:{ sheet:"Image_ff", title:"What affected delivery" },
     /* Stage-by-stage TAT, last 4 complete weeks (card 13272 -> images_pipeline): one row per
@@ -361,8 +361,7 @@ const PRODUCTS = [
       { id:"region", label:"Region",  sheet:"360_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
   { id:"video", label:"Video", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / video",6,
-      /* pendingNote: with video-metrics#2, SLA total = this total minus videos pending QC <6h, so the MTD gap can be explained */
-      { num:"delivered_videos", den:"total_videos", numLabel:"Delivered", denLabel:"Total", pendingNote:true }),
+      { num:"delivered_videos", den:"total_videos", numLabel:"Delivered", denLabel:"Total" }),
     quality:{ sheet:"video_qs", title:"Quality Chart" },
     panels:[
       { sheet:"video_ff",  title:"Fulfilment failure reasons", subtitle:"Failure reasons",
@@ -1419,8 +1418,7 @@ function tipCounts(laneId, metric, regionsOverride){
   const px=segPrefix();
   const n=aggSeries(laneId, px+metric.tip.n, "sum", regionsOverride);
   const bad=aggSeries(laneId, px+metric.tip.bad, "sum", regionsOverride);
-  const tot=metric.tip.total ? aggSeries(laneId, px+metric.tip.total, "sum", regionsOverride) : null;
-  return n.some(v=>v!=null) ? { n:n, bad:bad, tot:tot } : null;
+  return n.some(v=>v!=null) ? { n:n, bad:bad } : null;
 }
 /* Same layout as the fulfilment tooltip: period, the counts, then the value.
    Rooftop cards count rooftops, everything else counts SKUs. */
@@ -1432,11 +1430,7 @@ function tipHTML(metric, lab, v, counts, i, unit){
     n!=null?line(t.nLabel, num(n)):null,
     (n!=null&&bad!=null)?line(t.goodLabel, num(n-bad)):null,
     bad!=null?line(t.badLabel, num(bad)):null,
-    v!=null?line(esc(metric.label), fmt(metric,v)):null,
-    /* In-progress period: SKUs received too recently to judge. SKU lanes only -
-       rooftop SLA counts rooftops, so the fulfilment total is not comparable. */
-    (t.total && !unit && /^MTD\b/.test(String(lab)) && counts && counts.tot && counts.tot[i]!=null && n!=null && counts.tot[i]-n>0)
-      ? '<span style="color:#9DB4B1">+'+num(counts.tot[i]-n)+' received in the last 6h, not judged yet</span>' : null ].filter(Boolean).join("<br>").replace(/"/g,"&quot;");
+    v!=null?line(esc(metric.label), fmt(metric,v)):null ].filter(Boolean).join("<br>").replace(/"/g,"&quot;");
 }
 function metricSeries(laneId, metric, prefix, regionsOverride){
   if(metric.src==="bq") return costSeries(laneId, metric, prefix, regionsOverride);
