@@ -1971,8 +1971,12 @@ function pipeHTML(){
     }
   });
   body+=row("End-to-End",r.e2e_p90_hrs,r.e2e_p95_hrs,r.e2e_p99_hrs,r.e2e_avg_hrs,100,r.e2e_n,"tot");
-  const tot=+r.e2e_n||1, mix=[["FTP / partner publish",r.delivered_ftp_n],["API webhook",r.delivered_api_n],["At QC done (no push)",r.delivered_qc_done_n]]
-    .map(m=>'<span>'+m[0]+' <b class="num">'+n(m[1])+'</b> ('+(100*(+m[1]||0)/tot).toFixed(1)+'%)</span>').join("");
+  /* The fourth group is what the three channel counts leave out: QC'd SKUs whose feed push was logged before
+     QC done. Per the delivery rule they count as delivered at QC done (card 13272 labels them separately). */
+  const early=Math.max(0,(+r.e2e_n||0)-(+r.delivered_ftp_n||0)-(+r.delivered_api_n||0)-(+r.delivered_qc_done_n||0));
+  const tot=+r.e2e_n||1, mix=[["FTP / partner publish",r.delivered_ftp_n],["API webhook",r.delivered_api_n],["At QC done, no push",r.delivered_qc_done_n],
+    ["At QC done, pushed before QC",early,"Feed push was logged before QC finished, so the SKU counts as delivered at QC done"]]
+    .map(m=>'<span'+(m[2]?' title="'+esc(m[2])+'"':'')+'>'+m[0]+' <b class="num">'+n(m[1])+'</b> ('+(100*(+m[1]||0)/tot).toFixed(1)+'%)</span>').join("");
 
   /* P95 by stage, week by week */
   const weeks=["W-4","W-3","W-2","W-1"], wk=weeks.map(w=>rows.find(x=>x.period===w)||{});
