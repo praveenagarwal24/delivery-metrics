@@ -339,9 +339,10 @@ const PRODUCTS = [
       { id:"rt",     label:"Rooftop", sheet:"images_rt",     color:"var(--s2)", blurb:"Rolled up per dealership", tipUnit:"rooftops" },
       { id:"region", label:"Region",  sheet:"images_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
-  /* 360 reads the plain sheets, which leave Validation Failed spins out. The <sheet>_vf twins
-     (360-tracker-dashboard sync-sheets.js) still exist; set vfToggle:true to bring back the
-     Excluded/Included chip. Removed 2026-10-21. */
+  /* 360 reads the <sheet>_vf twins (360-tracker-dashboard sync-sheets.js), which keep Validation
+     Failed spins in Total and Fulfilment — the same numbers as the 360 dashboard's Reports tab.
+     SLA and TAT take delivered spins only, so they are the same in both twins. No chip
+     (removed 2026-10-21); the plain sheets (VF left out) are still written. */
   { id:"spin", label:"360", status:"live",
     metrics:mkMetrics("delivery_pct","Fulfilment","Cost / spin",6,
       { num:"total_delivered", den:"total_vin", numLabel:"Delivered", denLabel:"Total" }),
@@ -357,9 +358,9 @@ const PRODUCTS = [
         subtitle:"Failure reasons", tone:"amber", kind:"reasons", pctWhole:true }
     ],
     lanes:[
-      { id:"spin",   label:"Spin",    sheet:"360_spin",   color:"var(--s1)", blurb:"Every spin delivered" },
-      { id:"rt",     label:"Rooftop", sheet:"360_rt",     color:"var(--s2)", blurb:"Rolled up per dealership" },
-      { id:"region", label:"Region",  sheet:"360_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
+      { id:"spin",   label:"Spin",    sheet:"360_spin_vf",   color:"var(--s1)", blurb:"Every spin delivered" },
+      { id:"rt",     label:"Rooftop", sheet:"360_rt_vf",     color:"var(--s2)", blurb:"Rolled up per dealership" },
+      { id:"region", label:"Region",  sheet:"360_region_vf", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
   { id:"video", label:"Video", status:"live", metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / video",6,
       { num:"delivered_videos", den:"total_videos", numLabel:"Delivered", denLabel:"Total" }),
