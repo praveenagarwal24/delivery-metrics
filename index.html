@@ -1397,17 +1397,20 @@ function aggSeries(laneId, colName, mode, regionsOverride, skipZero){
     return mode==="sum" ? total : total/a.length;
   });
 }
-/* Count columns aren't segment-prefixed in every sheet, so try both. */
+/* Segment count columns are named two ways, so try both. With a segment selected and no
+   column for it, return nothing rather than the all-segment count - that showed the wrong
+   segment's Total/Delivered in the fulfilment tooltip and bars. */
 function countSeries(laneId, name, prefix, regionsOverride){
   const px = prefix!=null ? prefix : segPrefix();
   if(px){
-    /* ent_total_in (images) and total_ent_vin (360) are both in use. */
+    /* ent_total_in / ent_total_videos (images, video) and total_ent_vin (360) are both in use. */
     const tries=[ px+name, name.replace(/^total_/, "total_"+px) ];
     for(let i=0;i<tries.length;i++){
       if(tries[i]===name) continue;
       const got=aggSeries(laneId, tries[i], "sum", regionsOverride);
       if(got.some(v=>v!=null)) return got;
     }
+    return periodsOf().map(()=>null);
   }
   return aggSeries(laneId, name, "sum", regionsOverride);
 }
