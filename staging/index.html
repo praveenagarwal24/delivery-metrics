@@ -1224,7 +1224,7 @@ function extraHTML(){
       '<h3>'+esc(p.title)+'</h3><span class="rcard-rate" style="color:'+tone+'">'+pct(rate)+'</span></div>'+
       '<div class="rcard-sub"><span>'+esc(p.subtitle||"")+(rawHead && rawHead.issues>rawHead.n
           ? ' \u00b7 '+rawHead.issues.toLocaleString("en-IN")+' issues on '+rawHead.n.toLocaleString("en-IN")+' spins'
-          : ' \u00b7 all reasons')+'</span>'+
+          : (p.cat==="Not delivered yet" && rawHead ? '' : ' \u00b7 all reasons'))+'</span>'+
       '<span>'+(rawHead?'of all spins':'of reviewed')+' \u00b7 '+total.toLocaleString("en-IN")+'</span></div>'+
       '<ul class="rsns'+(p.noCap?" rsns--all":"")+'">'+body+'</ul></section>';
   }).join("");
