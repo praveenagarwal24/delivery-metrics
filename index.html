@@ -339,9 +339,10 @@ const PRODUCTS = [
       { id:"rt",     label:"Rooftop", sheet:"images_rt",     color:"var(--s2)", blurb:"Rolled up per dealership", tipUnit:"rooftops" },
       { id:"region", label:"Region",  sheet:"images_region", color:"var(--s3)", blurb:"Split by delivery region", dim:"region" }
     ]},
-  /* vfToggle: each lane sheet has a <sheet>_vf twin that includes Validation Failed spins
-     (360-tracker-dashboard sync-sheets.js). The plain sheets leave them out and are the default. */
-  { id:"spin", label:"360", status:"live", vfToggle:true,
+  /* 360 reads the plain sheets, which leave Validation Failed spins out. The <sheet>_vf twins
+     (360-tracker-dashboard sync-sheets.js) still exist; set vfToggle:true to bring back the
+     Excluded/Included chip. Removed 2026-10-21. */
+  { id:"spin", label:"360", status:"live",
     metrics:mkMetrics("delivery_pct","Fulfilment","Cost / spin",6,
       { num:"total_delivered", den:"total_vin", numLabel:"Delivered", denLabel:"Total" }),
     quality:{ sheet:"360_qs", title:"Quality Chart" },
