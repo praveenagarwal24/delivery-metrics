@@ -92,6 +92,7 @@ select.inp{background:var(--panel);border:1px solid var(--hair-strong);border-ra
 .sec{margin:30px 0 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .sec h2{margin:0;font-size:15px;font-weight:600;letter-spacing:-.005em}
 .sec .note{font-size:12.5px;color:var(--muted)}
+.sec-sel{height:32px;border:1px solid var(--hair-strong);border-radius:7px;padding:0 8px;font:inherit;font-size:12.5px;background:var(--panel);color:var(--ink)}
 
 /* ---------- glance grid ---------- */
 .lanes{display:grid;grid-template-columns:repeat(var(--lanes,3),minmax(0,1fr));gap:14px 18px;align-items:stretch}
@@ -452,7 +453,7 @@ const state = {
   data:{}, loading:false, error:null, synced:null, user:null, access:null, denied:false, loginLog:null,
   cost:null, costError:null, costLatest:null, extras:{}, programs:null, qualities:{},
   pipes:{}, pipePeriod:"L4W",
-  rawRows:{}, rawTypes:{}, rawSources:{}, rawSynced:null, srcOpen:false
+  rawRows:{}, rawTypes:{}, rawSources:{}, rawSynced:null, srcOpen:false, issuesPeriod:{}
 };
 /* ---------- 360 from raw data (engine-360.js) ---------- */
 function rawOn(prod){ return !!(prod && prod.raw) && RAW360 && !!window.Engine360; }
@@ -1134,7 +1135,10 @@ function extraHTML(){
   if(!prod || !prod.panels || !prod.panels.length) return "";
   const pct=v=>(v==null?"\u2014":(v*100).toFixed(2)+"%");
   const periodsNow=periodsOf();
-  const latestPeriod=periodsNow.length?periodsNow[periodsNow.length-1]:null;
+  let latestPeriod=periodsNow.length?periodsNow[periodsNow.length-1]:null;
+  /* Raw 360: the reasons show one period at a time, picked in the section header (as on the
+     360 dashboard's Reports tab); the latest one until another is picked. */
+  if(rawOn(prod) && periodsNow.indexOf(state.issuesPeriod[prod.id])>=0) latestPeriod=state.issuesPeriod[prod.id];
   let filtered=false;
   const rawIss = (rawOn(prod) && latestPeriod && state.rawRows[prod.id])
     ? Engine360.issues(state.rawRows[prod.id], rawFilters(), latestPeriod, state.granularity, state.segment) : null;
@@ -1213,8 +1217,11 @@ function extraHTML(){
   const shown=cards.split("<section").length-1;
   if(!cards.replace(/\s/g,"")) return "";
   return '<div class="sec"><h2>Fulfilment Gap Reasons</h2>'+
+    (rawOn(prod) && periodsNow.length ? '<select class="sec-sel" id="issPeriod" aria-label="Period for the reasons">'+
+      periodsNow.slice().reverse().map(x=>'<option value="'+esc(x)+'"'+(x===latestPeriod?' selected':'')+'>'+esc(periodLabel(x))+'</option>').join("")+
+    '</select>' : '')+
     '<span class="note">'+(filtered
-      ? esc(periodName(latestPeriod||""))+(rawOn(prod)?' \u00b7 follows every filter above':' \u00b7 follows the period filter')
+      ? esc(rawOn(prod)?periodLabel(latestPeriod||""):periodName(latestPeriod||""))+(rawOn(prod)?' \u00b7 follows every filter above':' \u00b7 follows the period filter')
       : 'Fixed \u2014 not affected by the filters above')+'</span></div>'+
     '<div class="rgrid" style="--cols:'+Math.max(1,shown)+'">'+cards+'</div>';
 }
@@ -1591,6 +1598,13 @@ function periodName(p){
   const map={ "MTD":"Month to date","M-1":"Last month","M-2":"2 months back","M-3":"3 months back","M-4":"4 months back",
               "W-1":"This week","W-2":"Last week","W-3":"2 weeks back","W-4":"3 weeks back" };
   return map[p]||p;
+}
+function periodLabel(p){
+  const d=/^D-(\d+)$/.exec(String(p));
+  if(!d) return periodName(p);
+  const row=raw(lanesOf()[0].id).find(r=>r.period===p);
+  const dt=row && row.date ? ' ('+row.date.getUTCDate()+'/'+(row.date.getUTCMonth()+1)+')' : '';   /* periods are UTC days */
+  return (d[1]==='1' ? 'Yesterday' : d[1]+' days back')+dt;
 }
 function esc(s){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 
@@ -2674,6 +2688,8 @@ function wire(){
     if(s.has(t)) s.delete(t); else s.add(t);
     computeRaw(); render();
   });
+  const ip=document.getElementById("issPeriod");
+  if(ip) ip.onchange=()=>{ state.issuesPeriod[state.product]=ip.value; render(); };
   const sb=document.getElementById("srcBtn");
   if(sb) sb.onclick=(e)=>{ e.stopPropagation(); state.srcOpen=!state.srcOpen; render(); };
   document.querySelectorAll("[data-rsrc]").forEach(cb=>cb.onchange=()=>{
