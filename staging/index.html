@@ -375,7 +375,11 @@ const PRODUCTS = [
       { sheet:"360_issue", raw:true, cat:"Validation Failed", title:"Validation Failed reasons",
         subtitle:"Failure reasons", tone:"red", kind:"reasons", pctWhole:true },
       { sheet:"360_issue", raw:true, cat:"Tech & AI Failure", title:"Tech & AI Failure reasons",
-        subtitle:"Failure reasons", tone:"amber", kind:"reasons", pctWhole:true }
+        subtitle:"Failure reasons", tone:"amber", kind:"reasons", pctWhole:true },
+      /* Raw only (no sheet): every other not-delivered status, so the four cards add up to the
+         Fulfilment shortfall. Hidden when "raw360": false. */
+      { raw:true, cat:"Not delivered yet", title:"Not delivered yet",
+        subtitle:"Processing, Under Review, Undelivered", tone:"muted", kind:"reasons", pctWhole:true }
     ],
     lanes:[
       { id:"spin",   label:"Spin",    sheet:"360_spin_vf",   color:"var(--s1)", blurb:"Every spin delivered" },
@@ -1144,10 +1148,18 @@ function extraHTML(){
     ? Engine360.issues(state.rawRows[prod.id], rawFilters(), latestPeriod, state.granularity, state.segment) : null;
   const cards=prod.panels.map(function(p){
     let rows = p.rows || (state.extras[state.product] && state.extras[state.product][p.sheet]) || null;
+    let rawHead=null;
     if(p.raw && rawOn(prod)){
       if(!rawIss) return "";
-      const map = p.cat==="QC Failed" ? rawIss.qcReasons : p.cat==="Validation Failed" ? rawIss.valReasons : rawIss.techReasons;
-      const base = rawIss.totalReviewed || 0;
+      /* Every not-delivered spin is in exactly one card; shares are of every spin (the Fulfilment
+         base), so the four cards add up to 100 \u2212 Fulfilment. QC lists issues (a spin can have
+         more than one blocker) but its header counts spins. */
+      const map = p.cat==="QC Failed" ? rawIss.qcReasons : p.cat==="Validation Failed" ? rawIss.valReasons
+                : p.cat==="Not delivered yet" ? rawIss.notYet : rawIss.techReasons;
+      const base = rawIss.total || 0;
+      const n = p.cat==="QC Failed" ? rawIss.qcSkus : Object.values(map).reduce((a,b)=>a+b,0);
+      rawHead = { n:n, rate: base ? n/base : 0,
+        issues: p.cat==="QC Failed" ? Object.values(map).reduce((a,b)=>a+b,0) : null };
       rows = Object.entries(map).sort((a,b)=>b[1]-a[1]).map(([label,count])=>({ pt:state.granularity, p:latestPeriod, cat:p.cat,
         label:label, count:count, pct: base ? count/base : null }));
       if(!rows.length) rows=[{ pt:state.granularity, p:"\u2014none\u2014", cat:p.cat, label:"", count:0, pct:null }];
@@ -1183,7 +1195,7 @@ function extraHTML(){
       filtered=true;
       if(!rows.length) return '<section class="rcard"><div class="rcard-hd"><h3>'+esc(p.title)+'</h3></div>'+
         '<p style="margin:10px 0 14px;font-size:13px;color:var(--muted)">Nothing recorded for '+
-        esc(latestPeriod||"this period")+'.</p></section>';
+        esc(rawOn(prod) ? periodLabel(latestPeriod||"").toLowerCase() : (latestPeriod||"this period"))+'.</p></section>';
     }
     if(!rows.length) return "";
     if(p.kind==="log"){
@@ -1197,9 +1209,9 @@ function extraHTML(){
         '<span class="rcard-rate" style="font-size:13px;color:var(--muted)">'+rows.length+
         ' logged</span></div><ul class="evs">'+items+'</ul></section>';
     }
-    const tone = p.tone==="amber" ? "var(--warn)" : "var(--down)";
-    const rate = p.rate!=null ? p.rate : rows.reduce((a,r)=>a+(r.pct||0),0);
-    const total= p.total!=null ? p.total : rows.reduce((a,r)=>a+(r.count||0),0);
+    const tone = p.tone==="amber" ? "var(--warn)" : p.tone==="muted" ? "var(--muted)" : "var(--down)";
+    const rate = rawHead ? rawHead.rate : p.rate!=null ? p.rate : rows.reduce((a,r)=>a+(r.pct||0),0);
+    const total= rawHead ? rawHead.n : p.total!=null ? p.total : rows.reduce((a,r)=>a+(r.count||0),0);
     const max  = Math.max.apply(null, rows.map(r=>r.count||0)) || 1;
     const body = rows.map(function(r){
       return '<li class="rsn"><div class="rsn-top"><span class="rsn-lab">'+esc(r.label)+'</span>'+
@@ -1210,8 +1222,10 @@ function extraHTML(){
     }).join("");
     return '<section class="rcard"><div class="rcard-hd">'+
       '<h3>'+esc(p.title)+'</h3><span class="rcard-rate" style="color:'+tone+'">'+pct(rate)+'</span></div>'+
-      '<div class="rcard-sub"><span>'+esc(p.subtitle||"")+' \u00b7 all reasons</span>'+
-      '<span>of reviewed \u00b7 '+total.toLocaleString("en-IN")+'</span></div>'+
+      '<div class="rcard-sub"><span>'+esc(p.subtitle||"")+(rawHead && rawHead.issues>rawHead.n
+          ? ' \u00b7 '+rawHead.issues.toLocaleString("en-IN")+' issues on '+rawHead.n.toLocaleString("en-IN")+' spins'
+          : ' \u00b7 all reasons')+'</span>'+
+      '<span>'+(rawHead?'of all spins':'of reviewed')+' \u00b7 '+total.toLocaleString("en-IN")+'</span></div>'+
       '<ul class="rsns'+(p.noCap?" rsns--all":"")+'">'+body+'</ul></section>';
   }).join("");
   const shown=cards.split("<section").length-1;
@@ -1221,7 +1235,7 @@ function extraHTML(){
       periodsNow.slice().reverse().map(x=>'<option value="'+esc(x)+'"'+(x===latestPeriod?' selected':'')+'>'+esc(periodLabel(x))+'</option>').join("")+
     '</select>' : '')+
     '<span class="note">'+(filtered
-      ? esc(rawOn(prod)?periodLabel(latestPeriod||""):periodName(latestPeriod||""))+(rawOn(prod)?' \u00b7 follows every filter above':' \u00b7 follows the period filter')
+      ? esc(rawOn(prod)?periodLabel(latestPeriod||""):periodName(latestPeriod||""))+(rawOn(prod)?' \u00b7 follows every filter above \u00b7 the cards add up to the spins not delivered':' \u00b7 follows the period filter')
       : 'Fixed \u2014 not affected by the filters above')+'</span></div>'+
     '<div class="rgrid" style="--cols:'+Math.max(1,shown)+'">'+cards+'</div>';
 }
@@ -1413,6 +1427,9 @@ function laneSetRows(laneId, rows){
   return rows;
 }
 function allRegions(){
+  /* Raw 360: every region in the data, so the chips (and the region filter) never depend on what
+     the other filters leave in the Region lane — e.g. after Source "Clear all" empties it. */
+  if(isRaw() && state.rawRows[state.product]) return Engine360.values(state.rawRows[state.product],'region');
   const s=new Set();
   raw("region").forEach(r=>{ if(r.region) s.add(r.region); });
   return [...s].sort();

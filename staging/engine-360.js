@@ -297,6 +297,42 @@ function failureReasonMaps(rows){
   return { qcReasons, valReasons, techReasons, totalReviewed };
 }
 
+// Fulfilment Gap Reasons (Reports Issues + Delivery Metrics' 360 tab): every SKU that wasn't
+// delivered lands in exactly one card, so the cards add up to Total − Delivered and their shares
+// (of every SKU) to 100 − Fulfilment.
+//   QC Failed      — card total = QC Failed SKUs; the list counts each Blocker issue, so a spin with
+//                    two blockers shows under both (no issue logged → its failure reason)
+//   Validation / Tech & AI — by failure reason, one per SKU (reasonGroup decides the card)
+//   Not delivered yet — every other status (Processing, Under Review, Undelivered, …), by status
+function gapReasonMaps(rows){
+  const qcReasons = {}, valReasons = {}, techReasons = {}, notYet = {};
+  let qcSkus = 0, delivered = 0;
+  for (const r of rows){
+    const fs = (r.fs||'').trim();
+    if (fs === 'Delivered'){ delivered++; continue; }
+    if (fs === 'QC Failed'){
+      qcSkus++;
+      const items = [];
+      if (r.isv) for (const part of String(r.isv).split('||')){
+        const t = part.trim();
+        if (/^blocker/i.test(t)) t.replace(/^blocker\s*-\s*/i,'').split(',').forEach(x => { x = x.trim(); if (x) items.push(x); });
+      }
+      if (!items.length) items.push(r.rej ? (r.rej||'').trim().slice(0,60) : '(no issue recorded)');
+      items.forEach(k => { qcReasons[k] = (qcReasons[k]||0)+1; });
+      continue;
+    }
+    const g = reasonGroup(r);
+    if (g){
+      const m = g === 'val' ? valReasons : techReasons, k = r.rej ? (r.rej||'').trim().slice(0,80) : '(no reason recorded)';
+      m[k] = (m[k]||0)+1;
+      continue;
+    }
+    const k = fs || '(no status)';
+    notYet[k] = (notYet[k]||0)+1;
+  }
+  return { qcReasons, qcSkus, valReasons, techReasons, notYet, total: rows.length, delivered };
+}
+
 // ═══════════ end of COPY ═══════════
 
 // ── what Delivery Metrics calls ──
@@ -332,12 +368,12 @@ function issues(allRows, f, periodLabel, granularity, segment){
   const p = periods.find(x => x.period === periodLabel && x.granularity === granularity);
   if (!p) return null;
   const rows = allRows.filter(r => rptInPeriod(r,p) && passes(r,f) && (!segment || segment==='all' || rptSegKey(r.seg)===segment));
-  return failureReasonMaps(rows);
+  return gapReasonMaps(rows);
 }
 function values(allRows, field){
   const s = new Set();
   for (const r of allRows){ const v = field==='source' ? r._src : field==='type' ? r.tt : (r.region||'Unknown'); if (v) s.add(v); }
   return [...s].sort();
 }
-global.Engine360 = { prepare, compute, issues, values, version: '2026-10-22' };
+global.Engine360 = { prepare, compute, issues, values, version: '2026-10-22b' };
 })(window);
