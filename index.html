@@ -348,6 +348,9 @@ const PRODUCTS = [
     /* Stage-by-stage TAT, last 4 complete weeks (card 13272 -> images_pipeline): one row per
        period (L4W, W-1..W-4) x segment x region_set. Stages add up to End-to-End per SKU. */
     pipeline:{ sheet:"images_pipeline", slaHrs:6 },
+    /* Input source (ai_sku.source). Cards 12998/13000/13001 carry a source_set column (sorted names
+       joined by commas, every combination); the lanes fetch only the selected set's rows. */
+    sources:["API","Android App","Console","FTP","iOS App"],
     lanes:[
       { id:"vin",    label:"VIN",     sheet:"images_vin",    color:"var(--s1)", blurb:"Every vehicle delivered" },
       /* tipUnit: card 13001 counts rooftops in its SLA/TAT columns, not SKUs */
@@ -456,7 +459,8 @@ const state = {
   data:{}, loading:false, error:null, synced:null, user:null, access:null, denied:false, loginLog:null,
   cost:null, costError:null, costLatest:null, extras:{}, programs:null, qualities:{},
   pipes:{}, pipePeriod:"L4W",
-  rawRows:{}, rawTypes:{}, rawSources:{}, rawSynced:null, srcOpen:false, issuesPeriod:{}
+  rawRows:{}, rawTypes:{}, rawSources:{}, rawSynced:null, srcOpen:false, issuesPeriod:{},
+  srcSel:{}, srcCols:{}
 };
 /* ---------- 360 from raw data (engine-360.js) ---------- */
 function rawOn(prod){ return !!(prod && prod.raw) && RAW360 && !!window.Engine360; }
@@ -509,7 +513,38 @@ function isAdmin(){ return !!(state.user && state.user.admin); }
    rooftop rows never overwrite images', and the two 360 modes never mix. */
 function curProduct(){ return PRODUCTS.find(p=>p.id===state.product)||{}; }
 function vfOn(){ return !!(curProduct().vfToggle && state.includeVF); }
-function key(laneId){ return state.product+(vfOn()?":vf":"")+":"+laneId; }
+function key(laneId){ return state.product+(vfOn()?":vf":"")+(srcOn()?"@"+srcKey():"")+":"+laneId; }
+/* ---------- Images input-source filter ---------- */
+function srcList(){ return curProduct().sources||null; }
+function srcSet(){
+  const id=state.product;
+  if(!state.srcSel[id]) state.srcSel[id]=new Set(srcList()||[]);
+  return state.srcSel[id];
+}
+/* On once the lane sheets are known to carry source_set (false = not there, e.g. before the cards ship). */
+function srcOn(){ return !!srcList() && state.srcCols[state.product]!==false; }
+function srcKey(){ return srcList().filter(x=>srcSet().has(x)).sort().join(","); }
+/* Column letter of source_set in a sheet (gviz queries address columns by letter), or null. */
+async function srcColumn(sheet){
+  const ck="col:"+sheet;
+  if(ck in state.srcCols) return state.srcCols[ck];
+  const t=await fetchTable(sheet,"select * limit 0");
+  const i=t.cols.findIndex(c=>String(c.label||"").trim()==="source_set");
+  return (state.srcCols[ck] = i<0 ? null : t.cols[i].id);
+}
+/* Lane rows for the selected sources: only that source_set's rows are fetched. */
+async function loadLaneRows(l){
+  const sheet=laneSheet(l);
+  if(!srcList()) return loadSheet(sheet);
+  const c=await srcColumn(sheet).catch(()=>null);
+  if(!c){ state.srcCols[state.product]=false; return loadSheet(sheet); }
+  state.srcCols[state.product]=true;
+  return loadSheet(sheet, "select * where "+c+" = '"+srcKey().replace(/'/g,"")+"'");
+}
+async function loadLanes(prod){
+  const results=await Promise.all(prod.lanes.map(loadLaneRows));
+  prod.lanes.forEach((l,i)=>{ state.data[key(l.id)]=results[i]; });
+}
 function laneSheet(l){ return vfOn() ? l.sheet+"_vf" : l.sheet; }
 function raw(laneId){ return state.data[key(laneId)] || []; }
 function regSet(){
@@ -672,14 +707,14 @@ async function showApp(fresh){
 }
 
 /* ---------- data ---------- */
-function gvizBase(sheet){
+function gvizBase(sheet, tq){
   return "https://docs.google.com/spreadsheets/d/"+SHEET_ID+
-         "/gviz/tq?headers=1&sheet="+encodeURIComponent(sheet)+"&_="+Date.now();
+         "/gviz/tq?headers=1&sheet="+encodeURIComponent(sheet)+(tq?"&tq="+encodeURIComponent(tq):"")+"&_="+Date.now();
 }
 /* Opened straight off disk, the page has a null origin and Google refuses the
    cross-origin fetch. A <script> tag has no such limit, so fall back to JSONP. */
 let jsonpN=0;
-function loadViaJsonp(sheet){
+function loadViaJsonp(sheet, tq){
   return new Promise(function(resolve,reject){
     const cb="__gviz_cb_"+(++jsonpN);
     const s=document.createElement("script");
@@ -692,18 +727,18 @@ function loadViaJsonp(sheet){
       } else resolve(resp.table);
     };
     s.onerror=function(){ if(!settled){ cleanup(); reject(new Error("Couldn\u2019t reach Google Sheets \u2014 check the connection")); } };
-    s.src=gvizBase(sheet)+"&tqx=out:json;responseHandler:"+cb;
+    s.src=gvizBase(sheet, tq)+"&tqx=out:json;responseHandler:"+cb;
     document.head.appendChild(s);
     setTimeout(function(){ if(!settled){ cleanup(); reject(new Error("Sheet \u201c"+sheet+"\u201d timed out")); } },25000);
   });
 }
-async function fetchTable(sheet){
+async function fetchTable(sheet, tq){
   try{
-    const res=await fetch(gvizBase(sheet)+"&tqx=out:json");
+    const res=await fetch(gvizBase(sheet, tq)+"&tqx=out:json");
     if(!res.ok) throw new Error("HTTP "+res.status);
     return parseGviz(await res.text());
   }catch(e){
-    return loadViaJsonp(sheet);
+    return loadViaJsonp(sheet, tq);
   }
 }
 function parseGviz(text){
@@ -744,8 +779,8 @@ function toDate(v){
   const m=/^Date\((\d+),(\d+),(\d+)/.exec(String(v));
   return m ? new Date(+m[1],+m[2],+m[3]) : new Date(v);
 }
-async function loadSheet(sheet){
-  const table=await fetchTable(sheet);
+async function loadSheet(sheet, tq){
+  const table=await fetchTable(sheet, tq);
   const labels=table.cols.map((c,i)=>(c.label||c.id||("col"+i)).trim());
   return table.rows.map(r=>{
     const o={ v:{} };
@@ -774,8 +809,7 @@ async function loadAll(){
       await loadRaw(prod);
       computeRaw();
     } else {
-      const results=await Promise.all(prod.lanes.map(l=>loadSheet(laneSheet(l))));
-      prod.lanes.forEach((l,i)=>{ state.data[key(l.id)]=results[i]; });
+      await loadLanes(prod);
     }
     if(!state.regionsInit[state.product]){
       allRegions().forEach(r=>regSet().add(r));
@@ -2183,7 +2217,9 @@ function render(){
   /* The page ends after the fixed panels. Trend, drill-down and the admin
      blocks are still built by the functions below - add them back to this list
      to restore them. */
-  const nothing = isRaw() && rawNothingSelected();
+  const nothing = (isRaw() && rawNothingSelected()) ||
+    (srcOn() && state.srcCols[state.product]===true && !srcSet().size
+      ? "No source selected \u2014 tick at least one source, or use Select all in the Source dropdown." : null);
   if(nothing){
     main.innerHTML = controlsHTML() +
       '<div class="state" style="margin-top:16px"><h3>Nothing selected</h3><p>'+esc(nothing)+'</p></div>';
@@ -2274,6 +2310,19 @@ function controlsHTML(){
           (state.srcOpen ? '<div class="msel-pop" role="dialog" aria-label="Source"><div class="msel-acts">'+
               '<button class="linky" data-srcact="all">Select all</button><button class="linky" data-srcact="none" style="color:var(--muted)">Clear all</button></div>'+
               srcs.map(v=>'<label><input type="checkbox" data-rsrc="'+esc(v)+'"'+(sSel.has(v)?' checked':'')+'> '+esc(v||'(blank)')+'</label>').join("")+
+            '</div>' : '')+
+        '</div></div>';
+    })() : '')+
+    (srcOn() && state.srcCols[state.product]===true ? (function(){
+      const all=srcList(), sel=srcSet(), n=sel.size;
+      const lab = n===0 ? 'No sources selected' : n===all.length ? 'All sources'
+        : n===1 ? esc([...sel][0]) : n+' sources <span class="msel-pill">'+(all.length-n)+' hidden</span>';
+      return '<div class="ctl"><span>Source</span><div class="msel" id="srcMs">'+
+          '<button class="msel-btn" id="srcBtn" aria-haspopup="true" aria-expanded="'+state.srcOpen+'"><span>'+lab+'</span>'+
+            '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="2,4 6,8 10,4"/></svg></button>'+
+          (state.srcOpen ? '<div class="msel-pop" role="dialog" aria-label="Source"><div class="msel-acts">'+
+              '<button class="linky" data-isrcact="all">Select all</button><button class="linky" data-isrcact="none" style="color:var(--muted)">Clear all</button></div>'+
+              all.map(v=>'<label><input type="checkbox" data-isrc="'+esc(v)+'"'+(sel.has(v)?' checked':'')+'> '+esc(v)+'</label>').join("")+
             '</div>' : '')+
         '</div></div>';
     })() : '')+
@@ -2726,6 +2775,25 @@ function wire(){
     const s=state.rawSources[state.product], t=cb.dataset.rsrc;
     if(cb.checked) s.add(t); else s.delete(t);
     computeRaw(); render();
+  });
+  /* Images source filter: the lanes reload for the new source_set (cached per selection). */
+  const srcChanged=()=>{
+    render();
+    if(!srcSet().size) return;
+    const prod=curProduct();
+    if(prod.lanes.every(l=>state.data[key(l.id)])) return;
+    loadLanes(prod).then(render).catch(err=>{ state.error=err.message||String(err); render(); });
+  };
+  document.querySelectorAll("[data-isrc]").forEach(cb=>cb.onchange=()=>{
+    const s=srcSet(), t=cb.dataset.isrc;
+    if(cb.checked) s.add(t); else s.delete(t);
+    srcChanged();
+  });
+  document.querySelectorAll("[data-isrcact]").forEach(b=>b.onclick=(e)=>{
+    e.stopPropagation();
+    const s=srcSet();
+    if(b.dataset.isrcact==="all") srcList().forEach(x=>s.add(x)); else s.clear();
+    srcChanged();
   });
   document.querySelectorAll("[data-srcact]").forEach(b=>b.onclick=(e)=>{
     e.stopPropagation();
