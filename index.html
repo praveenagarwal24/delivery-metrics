@@ -532,18 +532,23 @@ async function srcColumn(sheet){
   const i=t.cols.findIndex(c=>String(c.label||"").trim()==="source_set");
   return (state.srcCols[ck] = i<0 ? null : t.cols[i].id);
 }
-/* Lane rows for the selected sources: only that source_set's rows are fetched. */
-async function loadLaneRows(l){
+/* Lane rows for one source selection (sk): only that source_set's rows are fetched. */
+async function loadLaneRows(l, sk){
   const sheet=laneSheet(l);
   if(!srcList()) return loadSheet(sheet);
   const c=await srcColumn(sheet).catch(()=>null);
   if(!c){ state.srcCols[state.product]=false; return loadSheet(sheet); }
   state.srcCols[state.product]=true;
-  return loadSheet(sheet, "select * where "+c+" = '"+srcKey().replace(/'/g,"")+"'");
+  return loadSheet(sheet, "select * where "+c+" = '"+sk.replace(/'/g,"")+"'");
 }
+/* The selection is captured before any await: overlapping loads (quick clicks in the Source
+   dropdown) each store their rows under the selection they were requested for, never under
+   whatever is selected when they come back. */
 async function loadLanes(prod){
-  const results=await Promise.all(prod.lanes.map(loadLaneRows));
-  prod.lanes.forEach((l,i)=>{ state.data[key(l.id)]=results[i]; });
+  const pid=prod.id, sk=srcList()?srcKey():"", vf=vfOn()?":vf":"";
+  const results=await Promise.all(prod.lanes.map(l=>loadLaneRows(l, sk)));
+  const tag=(srcList() && state.srcCols[pid]!==false) ? "@"+sk : "";
+  prod.lanes.forEach((l,i)=>{ state.data[pid+vf+tag+":"+l.id]=results[i]; });
 }
 function laneSheet(l){ return vfOn() ? l.sheet+"_vf" : l.sheet; }
 function raw(laneId){ return state.data[key(laneId)] || []; }
@@ -2317,8 +2322,10 @@ function controlsHTML(){
       const all=srcList(), sel=srcSet(), n=sel.size;
       const lab = n===0 ? 'No sources selected' : n===all.length ? 'All sources'
         : n===1 ? esc([...sel][0]) : n+' sources <span class="msel-pill">'+(all.length-n)+' hidden</span>';
+      /* the selected rows are still on their way */
+      const busy=state.srcBusy && !curProduct().lanes.every(l=>state.data[key(l.id)]) ? ' <span class="msel-pill">loading\u2026</span>' : '';
       return '<div class="ctl"><span>Source</span><div class="msel" id="srcMs">'+
-          '<button class="msel-btn" id="srcBtn" aria-haspopup="true" aria-expanded="'+state.srcOpen+'"><span>'+lab+'</span>'+
+          '<button class="msel-btn" id="srcBtn" aria-haspopup="true" aria-expanded="'+state.srcOpen+'"><span>'+lab+busy+'</span>'+
             '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="2,4 6,8 10,4"/></svg></button>'+
           (state.srcOpen ? '<div class="msel-pop" role="dialog" aria-label="Source"><div class="msel-acts">'+
               '<button class="linky" data-isrcact="all">Select all</button><button class="linky" data-isrcact="none" style="color:var(--muted)">Clear all</button></div>'+
@@ -2782,7 +2789,9 @@ function wire(){
     if(!srcSet().size) return;
     const prod=curProduct();
     if(prod.lanes.every(l=>state.data[key(l.id)])) return;
-    loadLanes(prod).then(render).catch(err=>{ state.error=err.message||String(err); render(); });
+    state.srcBusy=(state.srcBusy||0)+1; render();
+    loadLanes(prod).then(()=>{ state.srcBusy--; render(); })
+      .catch(err=>{ state.srcBusy--; state.error=err.message||String(err); render(); });
   };
   document.querySelectorAll("[data-isrc]").forEach(cb=>cb.onchange=()=>{
     const s=srcSet(), t=cb.dataset.isrc;
