@@ -375,7 +375,7 @@ const PRODUCTS = [
       { sheet:"360_issue", raw:true, cat:"Validation Failed", title:"Validation Failed reasons",
         subtitle:"Failure reasons", tone:"red", kind:"reasons", pctWhole:true },
       { sheet:"360_issue", raw:true, cat:"Tech & AI Failure", title:"Tech & AI Failure reasons",
-        subtitle:"Failure reasons", tone:"amber", kind:"reasons", pctWhole:true },
+        subtitle:"Failure reasons", kind:"reasons", pctWhole:true },   /* red like the other reason cards (tone "amber" pointed at an undefined --warn, so no colour showed) */
       /* Raw only (no sheet): every other not-delivered status, so the four cards add up to the
          Fulfilment shortfall. Hidden when "raw360": false. */
       { raw:true, cat:"Not delivered yet", title:"Not delivered yet",
