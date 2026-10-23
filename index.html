@@ -1156,17 +1156,30 @@ async function loadExtra(prod){
       if(li<0) li=labels.findIndex((l,i)=>!num(i) && i!==pti && i!==pei && i!==cti);
       const pi=labels.findIndex((l,i)=>num(i)&&/^%$|pct|percent|share|rate/i.test(l));
       const ci=labels.findIndex((l,i)=>num(i)&&i!==pi);
+      /* Per-segment count/pct columns (ent_count/ent_pct, mid_*, resellers_*, smb_*)
+         let the segment chip rescope the card without a reload. Sheets without them
+         (every reasons sheet besides video_ff today) fall through to the overall pair. */
+      const segIdx={};
+      SEGMENTS.forEach(function(s){
+        if(!s.prefix) return;
+        const sc=low.indexOf(s.prefix+"count"), sp=low.indexOf(s.prefix+"pct");
+        if(sc>=0 && sp>=0) segIdx[s.id]={ci:sc, pi:sp};
+      });
+      /* pctWhole means the sheet already stores 1.58 for 1.58%. Guessing from
+         magnitude breaks below 1, where 0.28 would read as 28%. */
+      const scalePct = v => (v==null?null:(p.pctWhole ? v/100 : (v>1 ? v/100 : v)));
       out[p.sheet]=t.rows.map(function(r){
         const g=i=> (i>=0&&r.c&&r.c[i]&&r.c[i].v!=null) ? r.c[i].v : null;
-        let pct=g(pi);
-        /* pctWhole means the sheet already stores 1.58 for 1.58%. Guessing from
-           magnitude breaks below 1, where 0.28 would read as 28%. */
-        if(pct!=null) pct = p.pctWhole ? pct/100 : (pct>1 ? pct/100 : pct);
         let lab=g(li)==null?"":String(g(li)).trim();
         if(!lab || lab.toLowerCase()==="null") lab="Unspecified";
+        const seg={};
+        Object.keys(segIdx).forEach(function(id){
+          const sx=segIdx[id];
+          seg[id]={ count:Number(g(sx.ci))||0, pct:scalePct(g(sx.pi)) };
+        });
         return { pt:normGran(g(pti)), p:g(pei)==null?null:String(g(pei)).trim(),
                  cat:g(cti)==null?null:String(g(cti)).trim(),
-                 label:lab, count:Number(g(ci))||0, pct:pct };
+                 label:lab, count:Number(g(ci))||0, pct:scalePct(g(pi)), seg:seg };
       }).filter(x=>x.label);
     }catch(e){ out[p.sheet]=null; }
   }));
@@ -1248,14 +1261,24 @@ function extraHTML(){
         ' logged</span></div><ul class="evs">'+items+'</ul></section>';
     }
     const tone = p.tone==="amber" ? "var(--warn)" : p.tone==="muted" ? "var(--muted)" : "var(--down)";
-    const rate = rawHead ? rawHead.rate : p.rate!=null ? p.rate : rows.reduce((a,r)=>a+(r.pct||0),0);
-    const total= rawHead ? rawHead.n : p.total!=null ? p.total : rows.reduce((a,r)=>a+(r.count||0),0);
-    const max  = Math.max.apply(null, rows.map(r=>r.count||0)) || 1;
+    /* Segment chip reads the per-segment count/pct the loader attached; sheets
+       without those columns just stay on the overall pair. */
+    const segNow = (SEGMENTS.find(s=>s.id===state.segment)||SEGMENTS[0]).id;
+    const useSeg = segNow && segNow!=="all" && rows.some(r=>r.seg && r.seg[segNow]);
+    const cnt = r => useSeg ? (r.seg && r.seg[segNow] ? r.seg[segNow].count : 0) : (r.count||0);
+    const pcv = r => useSeg ? (r.seg && r.seg[segNow] ? r.seg[segNow].pct : null) : r.pct;
+    if(useSeg) rows = rows.filter(r => cnt(r) > 0);
+    if(!rows.length) return '<section class="rcard"><div class="rcard-hd"><h3>'+esc(p.title)+'</h3></div>'+
+      '<p style="margin:10px 0 14px;font-size:13px;color:var(--muted)">Nothing recorded for '+
+      esc(periodName(latestPeriod||"this period"))+'.</p></section>';
+    const rate = rawHead ? rawHead.rate : p.rate!=null ? p.rate : rows.reduce((a,r)=>a+(pcv(r)||0),0);
+    const total= rawHead ? rawHead.n : p.total!=null ? p.total : rows.reduce((a,r)=>a+cnt(r),0);
+    const max  = Math.max.apply(null, rows.map(cnt)) || 1;
     const body = rows.map(function(r){
       return '<li class="rsn"><div class="rsn-top"><span class="rsn-lab">'+esc(r.label)+'</span>'+
-        '<span class="rsn-num num">'+(r.count||0).toLocaleString("en-IN")+
-        ' <span class="rsn-dot">\u00b7</span> <b style="color:'+tone+'">'+pct(r.pct)+'</b></span></div>'+
-        '<div class="rsn-track"><i style="width:'+Math.max(2,((r.count||0)/max)*100).toFixed(1)+
+        '<span class="rsn-num num">'+cnt(r).toLocaleString("en-IN")+
+        ' <span class="rsn-dot">\u00b7</span> <b style="color:'+tone+'">'+pct(pcv(r))+'</b></span></div>'+
+        '<div class="rsn-track"><i style="width:'+Math.max(2,(cnt(r)/max)*100).toFixed(1)+
         '%;background:'+tone+'"></i></div></li>';
     }).join("");
     return '<section class="rcard"><div class="rcard-hd">'+
