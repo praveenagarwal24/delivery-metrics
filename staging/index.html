@@ -342,7 +342,7 @@ function mkMetrics(lastId,lastLabel,costLabel,slaHrs,combo){
 
 const PRODUCTS = [
   { id:"images", label:"Images", status:"live",
-    metrics:mkMetrics("fulfillment_pct","Fulfilment","Cost / image",6,
+    metrics:mkMetrics("complete_fulfillment_pct","Fulfilment","Cost / image",6,
       { num:"total_out", den:"total_in", numLabel:"Delivered", denLabel:"Total" }),
     quality:{ sheet:"image_qs", title:"Quality Chart" },
     incidents:{ sheet:"Image_ff", title:"What affected delivery" },
