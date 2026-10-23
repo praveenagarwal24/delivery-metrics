@@ -362,7 +362,7 @@ const PRODUCTS = [
      token, checked by its middleware). With "raw360": false in config.json the tab reads the sheets
      named below instead (the <sheet>_vf twins, Validation Failed included) — the revert path.
      Quality Chart and incidents always come from the sheet. Images and Video never use raw data. */
-  { id:"spin", label:"360", status:"live", raw:{ base:"https://360-tracker-dashboard.vercel.app" },
+  { id:"spin", label:"360", status:"live", raw:{ base:"https://360-tracker-dashboard.spyne.ai" },
     metrics:mkMetrics("delivery_pct","Fulfilment","Cost / spin",6,
       { num:"total_delivered", den:"total_vin", numLabel:"Delivered", denLabel:"Total" }),
     quality:{ sheet:"360_qs", title:"Quality Chart" },
